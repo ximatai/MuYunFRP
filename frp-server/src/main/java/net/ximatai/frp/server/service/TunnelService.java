@@ -5,7 +5,7 @@ import io.vertx.core.Vertx;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import net.ximatai.frp.server.config.FrpConfig;
+import net.ximatai.frp.server.config.FrpServerConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,14 +19,14 @@ public class TunnelService {
     Vertx vertx;
 
     @Inject
-    FrpConfig frpConfig;
+    FrpServerConfig frpServerConfig;
 
     @PostConstruct
     void init() {
 
-        LOGGER.info("Need Link Tunnel Size is {}",  frpConfig.tunnels().size());
+        LOGGER.info("Need Link Tunnel Size is {}", frpServerConfig.tunnels().size());
 
-        frpConfig.tunnels().forEach(tunnel -> {
+        frpServerConfig.tunnels().forEach(tunnel -> {
             new TunnelLinker(vertx).link(tunnel);
         });
     }

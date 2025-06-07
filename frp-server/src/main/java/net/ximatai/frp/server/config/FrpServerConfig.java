@@ -4,10 +4,9 @@ import io.smallrye.config.ConfigMapping;
 
 import java.util.List;
 
-@ConfigMapping(prefix = "frp")
-public interface FrpConfig {
+@ConfigMapping(prefix = "frp-server")
+public interface FrpServerConfig {
     ManagementConfig management();
 
     List<Tunnel> tunnels();
-
 }

@@ -1,11 +1,13 @@
 plugins {
     java
     alias(libs.plugins.quarkus) apply false
+    id("org.kordamp.gradle.jandex") version "2.1.0"
 }
 
 allprojects {
     apply {
         plugin("java")
+        plugin("org.kordamp.gradle.jandex")
     }
 
     repositories {
@@ -24,6 +26,10 @@ allprojects {
 
     tasks.test {
         useJUnitPlatform()
+    }
+
+    tasks.named<Javadoc>("javadoc") {
+        mustRunAfter(tasks.named("jandex"))
     }
 
     tasks.withType<Test> {

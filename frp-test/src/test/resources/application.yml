@@ -1,11 +1,23 @@
-frp:
+frp-server:
   management:
-    port: 8081
+    port: 8089
   tunnels:
     - name: 测试
-      user-port: 8082
+      open-port: 8082
       agent-port: 8083
+
+frp-agent:
+  agents:
+    - name: 测试
+      type: tcp
+      frp-server:
+        host: 127.0.0.1
+        port: 8083
+      proxy:
+        host: 127.0.0.1
+        port: 8082
+
 quarkus:
   http:
-    port: ${frp.management.port}
+    port: ${frp-server.management.port}
 
