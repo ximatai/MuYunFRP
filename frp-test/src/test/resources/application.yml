@@ -1,0 +1,11 @@
+frp:
+  management:
+    port: 8081
+  tunnels:
+    - name: 测试
+      user-port: 8082
+      agent-port: 8083
+quarkus:
+  http:
+    port: ${frp.management.port}
+

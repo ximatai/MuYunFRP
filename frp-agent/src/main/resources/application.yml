@@ -1,0 +1,11 @@
+frp:
+  agents:
+    - name: 测试
+      type: tcp
+      frp_server:
+        host: 127.0.0.1
+        port: 8083
+      proxy:
+        host: 127.0.0.1
+        port: 8082
+
