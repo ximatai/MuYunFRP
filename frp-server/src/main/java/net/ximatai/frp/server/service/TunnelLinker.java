@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory;
 public class TunnelLinker {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private Vertx vertx;
+    private final Vertx vertx;
 
     public TunnelLinker(Vertx vertx) {
         this.vertx = vertx;

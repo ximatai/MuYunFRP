@@ -5,15 +5,17 @@ plugins {
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.platform.bom))
 
-    implementation(project(":frp-server"))
-    implementation(project(":frp-agent"))
+    testImplementation(project(":frp-server"))
+    testImplementation(project(":frp-agent"))
 
-    implementation("io.quarkus:quarkus-config-yaml")
-    implementation("io.quarkus:quarkus-arc")
-    implementation("io.quarkus:quarkus-rest")
-    implementation("io.quarkus:quarkus-vertx")
-    implementation("io.quarkus:quarkus-reactive-routes")
-    implementation(libs.jackson.databind)
+    testImplementation("io.vertx:vertx-junit5:4.5.14")
+
+    testImplementation("io.quarkus:quarkus-config-yaml")
+    testImplementation("io.quarkus:quarkus-arc")
+    testImplementation("io.quarkus:quarkus-rest")
+    testImplementation("io.quarkus:quarkus-vertx")
+    testImplementation("io.quarkus:quarkus-reactive-routes")
+    testImplementation(libs.jackson.databind)
 
     testImplementation("io.quarkus:quarkus-junit5")
     testImplementation("io.rest-assured:rest-assured")
