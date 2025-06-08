@@ -3,13 +3,20 @@ package net.ximatai.frp;
 import io.quarkus.test.junit.QuarkusTest;
 import io.vertx.core.Vertx;
 import jakarta.inject.Inject;
-import net.ximatai.frp.agent.config.FrpAgentConfig;
+import net.ximatai.frp.agent.config.Agent;
+import net.ximatai.frp.agent.config.FrpTunnel;
+import net.ximatai.frp.agent.config.ProxyServer;
+import net.ximatai.frp.agent.config.ProxyType;
+import net.ximatai.frp.agent.service.AgentLinker;
 import net.ximatai.frp.mock.MockServerVerticle;
-import net.ximatai.frp.server.config.FrpServerConfig;
+import net.ximatai.frp.server.config.Tunnel;
+import net.ximatai.frp.server.service.TunnelLinker;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
@@ -19,30 +26,98 @@ import static org.hamcrest.CoreMatchers.is;
 @QuarkusTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class FrpTest {
+    private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private int mockServerPort = 7788;
+    private static final int mockServerPort = 7788;
+    private static final int frpTunnelAgentPort = 8083;
+    private static final int frpTunnelOpenPort = 8082;
+
     @Inject
     Vertx vertx;
 
-    @Inject
-    FrpServerConfig serverConfig;
-
-    @Inject
-    FrpAgentConfig agentConfig;
-
     @BeforeAll
     void beforeAll() {
-        Assertions.assertNotNull(serverConfig);
-        Assertions.assertNotNull(agentConfig);
+
+        Assertions.assertFalse(Boolean.getBoolean("vertx.disableWebsockets"));
 
         vertx.deployVerticle(new MockServerVerticle(mockServerPort))
                 .toCompletionStage()
                 .toCompletableFuture()
                 .join();
+
+        LOGGER.info("mockServer deploy success.");
+
+        Tunnel testTunnel = new Tunnel() {
+            @Override
+            public String name() {
+                return "test";
+            }
+
+            @Override
+            public int openPort() {
+                return frpTunnelOpenPort;
+            }
+
+            @Override
+            public int agentPort() {
+                return frpTunnelAgentPort;
+            }
+        };
+
+        new TunnelLinker(vertx, testTunnel).link().toCompletionStage().toCompletableFuture().join();
+
+        LOGGER.info("TunnelLinker success.");
+
+        Agent testAgent = new Agent() {
+            @Override
+            public String name() {
+                return "test";
+            }
+
+            @Override
+            public ProxyType type() {
+                return ProxyType.http;
+            }
+
+            @Override
+            public FrpTunnel frpTunnel() {
+                return new FrpTunnel() {
+                    @Override
+                    public String host() {
+                        return "127.0.0.1";
+                    }
+
+                    @Override
+                    public int port() {
+                        return frpTunnelAgentPort;
+                    }
+                };
+            }
+
+            @Override
+            public ProxyServer proxy() {
+                return new ProxyServer() {
+                    @Override
+                    public String host() {
+                        return "127.0.0.1";
+                    }
+
+                    @Override
+                    public int port() {
+                        return mockServerPort;
+                    }
+                };
+            }
+        };
+
+        new AgentLinker(vertx, testAgent).link().toCompletionStage().toCompletableFuture().join();
+
+        LOGGER.info("AgentLinker success.");
+
     }
 
     @Test
-    void testMockServer() throws Exception {
+    void testMockServer() {
         given()
                 .when()
                 .get("http://localhost:%s/test".formatted(mockServerPort))
@@ -56,7 +131,26 @@ class FrpTest {
                 .when()
                 .post("http://localhost:%s/test".formatted(mockServerPort))
                 .then()
-                .statusCode(200);
+                .statusCode(200)
+                .body(is("hello frp"));
+    }
+
+    @Test
+    void testFrpServer() {
+        given()
+                .when()
+                .get("http://localhost:%s/test".formatted(frpTunnelOpenPort))
+                .then()
+                .statusCode(200)
+                .body(is("hello"));
+
+//        given()
+//                .contentType("application/json")
+//                .body(Map.of("name", "frp"))
+//                .when()
+//                .post("http://localhost:%s/test".formatted(frpTunnelOpenPort))
+//                .then()
+//                .statusCode(200)
 //                .body(is("hello frp"));
     }
 

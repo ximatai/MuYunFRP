@@ -5,7 +5,7 @@ public interface Agent {
 
     ProxyType type();
 
-    FrpServer frpServer();
+    FrpTunnel frpTunnel();
 
     ProxyServer proxy();
 }

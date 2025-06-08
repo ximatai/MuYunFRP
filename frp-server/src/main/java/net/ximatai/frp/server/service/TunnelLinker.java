@@ -5,6 +5,7 @@ import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpServer;
+import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.http.WebSocketFrame;
 import io.vertx.core.http.WebSocketFrameType;
@@ -41,60 +42,82 @@ public class TunnelLinker {
         this.tunnel = tunnel;
     }
 
-    public void link() {
+    public Future<Void> link() {
+        Promise<Void> promise = Promise.promise();
         int openPort = tunnel.openPort();
         int agentPort = tunnel.agentPort();
 
-        LOGGER.info("Try To Link {}, UserPort is {}, AgentPort is {}",
+        LOGGER.info("Try To Link {}, OpenPort is {}, AgentPort is {}",
                 tunnel.name(), openPort, agentPort);
 
         createAgentServer(agentPort)
                 .compose(v -> createPublicServer(openPort))
+                .onSuccess(v -> {
+                    LOGGER.info("Link {} Success", tunnel.name());
+                    promise.complete();
+                })
                 .onFailure(throwable -> {
                     LOGGER.error("Link {} Failed", tunnel.name(), throwable);
+                    promise.fail(throwable);
                 });
+
+        return promise.future();
     }
 
     private Future<Void> createAgentServer(int port) {
         Promise<Void> promise = Promise.promise();
 
-        HttpServer server = vertx.createHttpServer();
+        HttpServerOptions options = new HttpServerOptions()
+                .setRegisterWebSocketWriteHandlers(true);
+        HttpServer server = vertx.createHttpServer(options);
 
-        server.webSocketHandler(webSocket -> {
-            // 客户端连接处理
-            String clientId = UUID.randomUUID().toString();
-            LOGGER.info("FRP Client connected: {} @ {}", clientId, webSocket.remoteAddress());
+        server
+//                .webSocketHandshakeHandler(handshake -> {
+//                    LOGGER.info("FRP Client handshake: {}", handshake.uri());
+//                    handshake.accept();
+//                })
+                .webSocketHandler(webSocket -> {
+                    // 客户端连接处理
+                    String clientId = UUID.randomUUID().toString();
+                    LOGGER.info("FRP Client connected: {} @ {}", clientId, webSocket.remoteAddress());
 
-            // 将新客户端添加到活跃列表
-            activeClients.put(clientId, webSocket);
+                    // 将新客户端添加到活跃列表
+                    activeClients.put(clientId, webSocket);
 
-            // 设置消息处理器
-            webSocket.frameHandler(frame -> handleClientFrame(clientId, frame));
+                    // 设置消息处理器
+                    webSocket.frameHandler(frame -> handleClientFrame(clientId, frame));
 
-            // 设置关闭处理器
-            webSocket.closeHandler(v -> {
-                activeClients.remove(clientId);
-                LOGGER.warn("FRP Client disconnected: {}", clientId);
-            });
+                    // 设置关闭处理器
+                    webSocket.closeHandler(v -> {
+                        activeClients.remove(clientId);
+                        LOGGER.warn("FRP Client disconnected: {}", clientId);
+                    });
 
-            // 设置异常处理器
-            webSocket.exceptionHandler(ex -> {
-                LOGGER.error("WebSocket error for client {}", clientId, ex);
-                activeClients.remove(clientId);
-                webSocket.close();
-            });
+                    // 设置异常处理器
+                    webSocket.exceptionHandler(ex -> {
+                        LOGGER.error("WebSocket error for client {}", clientId, ex);
+                        activeClients.remove(clientId);
+                        webSocket.close();
+                    });
 
-            // 启用心跳检测
-            setupHeartbeat(webSocket, clientId);
-        }).listen(port, res -> {
-            if (res.succeeded()) {
-                LOGGER.info("Agent server listening on port {}", port);
-                promise.complete();
-            } else {
-                LOGGER.error("Agent server failed to start on port {}", port, res.cause());
-                promise.fail(res.cause());
-            }
-        });
+                    // 启用心跳检测
+                    setupHeartbeat(webSocket, clientId);
+                })
+                .invalidRequestHandler(request -> {
+                    LOGGER.error("Invalid request: {}", request.uri());
+                })
+                .exceptionHandler(err -> {
+                    LOGGER.error("Server error", err);
+                })
+                .listen(port)
+                .onSuccess(s -> {
+                    LOGGER.info("Agent server listening on port {}", port);
+                    promise.complete();
+                })
+                .onFailure(err -> {
+                    LOGGER.error("Agent server failed to start on port {}", port, err);
+                    promise.fail(err);
+                });
 
         return promise.future();
     }
@@ -150,14 +173,14 @@ public class TunnelLinker {
                         }
                     });
                 })
-                .listen(port, res -> {
-                    if (res.succeeded()) {
-                        LOGGER.info("Public server listening on port {}", port);
-                        promise.complete();
-                    } else {
-                        LOGGER.error("Public server failed to start on port {}", port, res.cause());
-                        promise.fail(res.cause());
-                    }
+                .listen(port)
+                .onSuccess(server -> {
+                    LOGGER.info("Public server listening on port {}", port);
+                    promise.complete();
+                })
+                .onFailure(throwable -> {
+                    LOGGER.error("Public server failed to start on port {}", port, throwable);
+                    promise.fail(throwable);
                 });
 
         return promise.future();

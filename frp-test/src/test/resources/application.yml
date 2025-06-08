@@ -10,14 +10,18 @@ frp-agent:
   agents:
     - name: 测试
       type: tcp
-      frp-server:
+      frp-tunnel:
         host: 127.0.0.1
         port: 8083
       proxy:
         host: 127.0.0.1
-        port: 8082
+        port: 7788
 
 quarkus:
   http:
     port: ${frp-server.management.port}
-
+  log:
+    level: INFO
+    console:
+      enable: true
+      format: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{3.}] (%t) Line:%L - %s%e%n"

@@ -14,6 +14,7 @@ dependencies {
     testImplementation("io.quarkus:quarkus-arc")
     testImplementation("io.quarkus:quarkus-rest")
     testImplementation("io.quarkus:quarkus-vertx")
+    testImplementation("io.quarkus:quarkus-websockets")
     testImplementation("io.quarkus:quarkus-reactive-routes")
     testImplementation(libs.jackson.databind)
 
