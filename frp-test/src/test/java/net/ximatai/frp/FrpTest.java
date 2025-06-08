@@ -144,14 +144,14 @@ class FrpTest {
                 .statusCode(200)
                 .body(is("hello"));
 
-//        given()
-//                .contentType("application/json")
-//                .body(Map.of("name", "frp"))
-//                .when()
-//                .post("http://localhost:%s/test".formatted(frpTunnelOpenPort))
-//                .then()
-//                .statusCode(200)
-//                .body(is("hello frp"));
+        given()
+                .contentType("application/json")
+                .body(Map.of("name", "frp"))
+                .when()
+                .post("http://localhost:%s/test".formatted(frpTunnelOpenPort))
+                .then()
+                .statusCode(200)
+                .body(is("hello frp"));
     }
 
 }

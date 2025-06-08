@@ -72,10 +72,6 @@ public class TunnelLinker {
         HttpServer server = vertx.createHttpServer(options);
 
         server
-//                .webSocketHandshakeHandler(handshake -> {
-//                    LOGGER.info("FRP Client handshake: {}", handshake.uri());
-//                    handshake.accept();
-//                })
                 .webSocketHandler(webSocket -> {
                     // 客户端连接处理
                     String clientId = UUID.randomUUID().toString();

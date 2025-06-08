@@ -21,6 +21,10 @@ quarkus:
   http:
     port: ${frp-server.management.port}
   log:
+    category:
+      "net.ximatai":
+        level: DEBUG
+
     level: INFO
     console:
       enable: true
