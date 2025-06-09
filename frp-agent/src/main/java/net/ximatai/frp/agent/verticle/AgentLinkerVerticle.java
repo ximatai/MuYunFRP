@@ -138,7 +138,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                     break;
 
                 case DATA:
-                    LOGGER.debug("Received DATA for request: {} ({} bytes)", requestId, payload != null ? payload.length() : 0);
+                    LOGGER.trace("Received DATA for request: {} ({} bytes)", requestId, payload != null ? payload.length() : 0);
                     handleDataRequest(requestId, payload);
                     break;
 

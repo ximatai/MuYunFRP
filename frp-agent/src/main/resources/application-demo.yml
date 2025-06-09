@@ -1,0 +1,19 @@
+frp-agent:
+  type: tcp
+  frp-tunnel:
+    host: 127.0.0.1
+    port: 8083
+  proxy:
+    host: 192.168.6.203
+    port: 22
+
+quarkus:
+  log:
+    category:
+      "net.ximatai":
+        level: DEBUG
+
+    level: INFO
+    console:
+      enable: true
+      format: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{3.}] (%t) Line:%L - %s%e%n"

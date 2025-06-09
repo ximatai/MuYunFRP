@@ -237,7 +237,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 case DATA:
                     if (payload != null) {
                         context.getSocket().write(payload);
-                        LOGGER.debug("Forwarded {} bytes to user for request {}", payload.length(), requestId);
+                        LOGGER.trace("Forwarded {} bytes to user for request {}", payload.length(), requestId);
                     }
                     break;
 

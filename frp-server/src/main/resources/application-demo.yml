@@ -6,17 +6,6 @@ frp-server:
       open-port: 8082
       agent-port: 8083
 
-frp-agent:
-  agents:
-    - name: 测试
-      type: tcp
-      frp-tunnel:
-        host: 127.0.0.1
-        port: 8083
-      proxy:
-        host: 127.0.0.1
-        port: 7788
-
 quarkus:
   http:
     port: ${frp-server.management.port}
