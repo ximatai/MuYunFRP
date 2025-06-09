@@ -1,12 +1,12 @@
-package net.ximatai.frp.agent.service;
+package net.ximatai.frp.agent.verticle;
 
+import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.WebSocket;
 import io.vertx.core.http.WebSocketClientOptions;
-import io.vertx.core.http.WebSocketConnectOptions;
 import io.vertx.core.http.WebSocketFrame;
 import io.vertx.core.net.NetSocket;
 import net.ximatai.frp.agent.config.Agent;
@@ -18,10 +18,9 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
-public class AgentLinker {
-    private static final Logger LOGGER = LoggerFactory.getLogger(AgentLinker.class);
+public class AgentLinkerVerticle extends AbstractVerticle {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentLinkerVerticle.class);
 
     // 协议常量（必须与服务器端匹配）
     private static final byte CONNECT = 0x01;
@@ -48,13 +47,15 @@ public class AgentLinker {
     private int reconnectAttempts = 0;
     private long nextReconnectDelay = INITIAL_RECONNECT_DELAY;
 
-    public AgentLinker(Vertx vertx, Agent agent) {
+    public AgentLinkerVerticle(Vertx vertx, Agent agent) {
         this.vertx = vertx;
         this.agent = agent;
     }
 
-    public Future<Void> link() {
-        return connectToFrpTunnel();
+    @Override
+    public void start(Promise<Void> startPromise) {
+        connectToFrpTunnel()
+                .onComplete(startPromise);
     }
 
     private Future<Void> connectToFrpTunnel() {

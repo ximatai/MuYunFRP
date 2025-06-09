@@ -1,5 +1,6 @@
 package net.ximatai.frp.server.service;
 
+import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
@@ -18,7 +19,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class TunnelLinker {
+public class TunnelLinker extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinker.class);
     private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
     private static final int REQUEST_TIMEOUT = 30000; // 30秒请求超时
@@ -42,8 +43,8 @@ public class TunnelLinker {
         this.tunnel = tunnel;
     }
 
-    public Future<Void> link() {
-        Promise<Void> promise = Promise.promise();
+    @Override
+    public void start(Promise<Void> startPromise) {
         int openPort = tunnel.openPort();
         int agentPort = tunnel.agentPort();
 
@@ -54,14 +55,12 @@ public class TunnelLinker {
                 .compose(v -> createPublicServer(openPort))
                 .onSuccess(v -> {
                     LOGGER.info("Link {} Success", tunnel.name());
-                    promise.complete();
+                    startPromise.complete();
                 })
                 .onFailure(throwable -> {
                     LOGGER.error("Link {} Failed", tunnel.name(), throwable);
-                    promise.fail(throwable);
+                    startPromise.fail(throwable);
                 });
-
-        return promise.future();
     }
 
     private Future<Void> createAgentServer(int port) {

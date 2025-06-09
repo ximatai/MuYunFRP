@@ -6,6 +6,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.FrpAgentConfig;
+import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,7 +28,8 @@ public class AgentService {
         LOGGER.info("Need Link Agent Size is {}", agentConfig.agents().size());
 
         agentConfig.agents().forEach(agent -> {
-            new AgentLinker(vertx, agent).link();
+            AgentLinkerVerticle linker = new AgentLinkerVerticle(vertx, agent);
+            vertx.deployVerticle(linker);
         });
 
     }
