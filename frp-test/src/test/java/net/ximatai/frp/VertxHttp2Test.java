@@ -68,7 +68,7 @@ public class VertxHttp2Test {
                             .putHeader("content-type", "text/plain")
                             .end("Hello from HTTP/2 server!");
                 })
-                .listen()
+                .listen(9527)
                 .toCompletionStage()
                 .toCompletableFuture()
                 .join();
