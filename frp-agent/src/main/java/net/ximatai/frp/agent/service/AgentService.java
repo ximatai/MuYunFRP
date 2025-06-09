@@ -7,14 +7,10 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.Agent;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @Startup
 @ApplicationScoped
 public class AgentService {
-
-    private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
     @Inject
     Vertx vertx;

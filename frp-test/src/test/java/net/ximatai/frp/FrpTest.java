@@ -82,11 +82,6 @@ class FrpTest {
 
         Agent testAgent = new Agent() {
             @Override
-            public String name() {
-                return "test";
-            }
-
-            @Override
             public ProxyType type() {
                 return ProxyType.http;
             }
