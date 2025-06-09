@@ -43,11 +43,10 @@ public class VertxWebsocketTest {
 
     void startServer() {
         HttpServer server = vertx.createHttpServer()
-//                .webSocketHandshakeHandler()
                 .webSocketHandler(webSocket -> {
                     System.out.println("Connected!");
                 })
-                .listen()
+                .listen(9527)
                 .toCompletionStage()
                 .toCompletableFuture()
                 .join();
