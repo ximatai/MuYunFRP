@@ -27,7 +27,7 @@ public class TunnelService {
         LOGGER.info("Need Link Tunnel Size is {}", frpServerConfig.tunnels().size());
 
         frpServerConfig.tunnels().forEach(tunnel -> {
-            TunnelLinker linker = new TunnelLinker(vertx, tunnel);
+            TunnelLinkerVerticle linker = new TunnelLinkerVerticle(vertx, tunnel);
             vertx.deployVerticle(linker);
         });
     }

@@ -15,6 +15,7 @@ import net.ximatai.frp.agent.config.ProxyServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,7 +39,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     private WebSocket controlSocket;
 
     // 存储请求映射 (requestId -> NetSocket连接到目标服务)
-    private final Map<String, NetSocket> pendingRequests = new ConcurrentHashMap<>();
+    private final Map<String, NetSocket> pendingRequests = new HashMap<>();
 
     // 心跳计时器ID
     private Long heartbeatTimerId;
@@ -83,14 +84,14 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                     // 设置关闭处理器
                     ws.closeHandler(v -> {
                         LOGGER.warn("Connection to FRP server closed");
-                        handleConnectionLoss();
+                        handleConnectionLoss(true);
                     });
 
                     // 设置异常处理器
                     ws.exceptionHandler(ex -> {
                         LOGGER.error("WebSocket connection error", ex);
                         ws.close();
-                        handleConnectionLoss();
+                        handleConnectionLoss(false);
                     });
 
                     // 启用心跳检测
@@ -140,7 +141,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                     break;
 
                 case DATA:
-                    LOGGER.trace("Received DATA for request: {} ({} bytes)", requestId, payload != null ? payload.length() : 0);
+                    LOGGER.debug("Received DATA for request: {} ({} bytes)", requestId, payload != null ? payload.length() : 0);
                     handleDataRequest(requestId, payload);
                     break;
 
@@ -158,67 +159,89 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     }
 
     private void handleConnectRequest(String requestId) {
+
         // 确保请求ID唯一（不应该已存在）
         if (pendingRequests.containsKey(requestId)) {
             LOGGER.warn("Request ID {} already exists", requestId);
-            return;
         }
 
         ProxyServer proxyServer = agent.proxy();
 
-        // 连接到目标服务
-        vertx.createNetClient()
-                .connect(proxyServer.port(), proxyServer.host())
-                .onSuccess(socket -> {
-                    LOGGER.debug("Connected to target service for request: {}", requestId);
+        LOGGER.debug("Try connect to target service for request: {}", requestId);
 
-                    // 保存到目标服务的连接
-                    pendingRequests.put(requestId, socket);
+        vertx.sharedData().getLock(requestId)
+                .onSuccess(lock -> {
+                    // 连接到目标服务
+                    vertx.createNetClient()
+                            .connect(proxyServer.port(), proxyServer.host())
+                            .onSuccess(socket -> {
+                                LOGGER.debug("Connected to target service for request: {}", requestId);
 
-                    // 处理目标服务的数据
-                    socket.handler(data -> {
-                        try {
-                            sendDataToServer(requestId, data);
-                        } catch (Exception ex) {
-                            LOGGER.error("Error sending data to server", ex);
-                            closeRequestConnection(requestId);
-                        }
-                    });
+                                // 保存到目标服务的连接
+                                pendingRequests.put(requestId, socket);
 
-                    // 处理目标服务关闭
-                    socket.closeHandler(v -> {
-                        LOGGER.debug("Target service connection closed for request: {}", requestId);
-                        closeRequestConnection(requestId);
-                    });
+                                // 处理目标服务的数据
+                                socket.handler(data -> {
+                                    try {
+                                        sendDataToServer(requestId, data);
+                                    } catch (Exception ex) {
+                                        LOGGER.error("Error sending data to server", ex);
+                                        closeRequestConnection(requestId);
+                                    }
+                                });
 
-                    // 处理目标服务异常
-                    socket.exceptionHandler(ex -> {
-                        LOGGER.error("Target service connection error for request: {}", requestId, ex);
-                        closeRequestConnection(requestId);
-                    });
+                                // 处理目标服务关闭
+                                socket.closeHandler(v -> {
+                                    LOGGER.debug("Target service connection closed for request: {}", requestId);
+                                    closeRequestConnection(requestId);
+                                });
+
+                                // 处理目标服务异常
+                                socket.exceptionHandler(ex -> {
+                                    LOGGER.error("Target service connection error for request: {}", requestId, ex);
+                                    closeRequestConnection(requestId);
+                                });
+
+                                lock.release();
+                            })
+                            .onFailure(t -> {
+                                LOGGER.error("Failed to connect to target service for request: {}", requestId, t);
+                                notifyServerOfConnectionFailure(requestId);
+                                lock.release();
+                            });
                 })
                 .onFailure(t -> {
-                    LOGGER.error("Failed to connect to target service for request: {}", requestId, t);
-                    notifyServerOfConnectionFailure(requestId);
+                    LOGGER.error("Failed to acquire lock for request: {}", requestId, t);
                 });
+
     }
 
     private void handleDataRequest(String requestId, Buffer data) {
-        NetSocket targetSocket = pendingRequests.get(requestId);
-        if (targetSocket == null) {
-            LOGGER.warn("Received data for unknown request: {}", requestId);
-            return;
-        }
+        vertx.sharedData().getLock(requestId)
+                .onSuccess(lock -> {
+                    NetSocket targetSocket = pendingRequests.get(requestId);
 
-        try {
-            if (data != null && data.length() > 0) {
-                targetSocket.write(data);
-                LOGGER.trace("Forwarded {} bytes to target service for request {}", data.length(), requestId);
-            }
-        } catch (Exception ex) {
-            LOGGER.error("Failed to write data to target service for request: {}", requestId, ex);
-            closeRequestConnection(requestId);
-        }
+                    lock.release();
+
+                    if (targetSocket == null) {
+                        LOGGER.warn("Received data for unknown request: {}", requestId);
+                        return;
+                    }
+
+                    try {
+                        if (data != null && data.length() > 0) {
+                            targetSocket.write(data);
+                            LOGGER.trace("Forwarded {} bytes to target service for request {}", data.length(), requestId);
+                        }
+                    } catch (Exception ex) {
+                        LOGGER.error("Failed to write data to target service for request: {}", requestId, ex);
+                        closeRequestConnection(requestId);
+                    }
+                })
+                .onFailure(t -> {
+                    LOGGER.error("Failed to acquire lock for request: {}", requestId, t);
+                });
+
     }
 
     private void handleCloseRequest(String requestId) {
@@ -293,7 +316,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             } catch (Exception ex) {
                 LOGGER.error("Failed to send heartbeat", ex);
                 stopHeartbeat();
-                handleConnectionLoss();
+                handleConnectionLoss(false);
             }
         });
     }
@@ -305,8 +328,10 @@ public class AgentLinkerVerticle extends AbstractVerticle {
         }
     }
 
-    private void handleConnectionLoss() {
-        LOGGER.error("Connection to FRP server lost");
+    private void handleConnectionLoss(boolean asPlanned) {
+        if (!asPlanned) {
+            LOGGER.error("Connection to FRP server lost");
+        }
 
         // 关闭所有目标服务连接
         for (NetSocket socket : pendingRequests.values()) {
@@ -323,8 +348,11 @@ public class AgentLinkerVerticle extends AbstractVerticle {
         // 重置控制通道
         controlSocket = null;
 
-        // 尝试重新连接
-        scheduleReconnect();
+        if (!asPlanned) {
+            // 计划外尝试重新连接
+            scheduleReconnect();
+        }
+
     }
 
     private void scheduleReconnect() {
@@ -364,6 +392,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                 .setDefaultPort(server.port());
     }
 
+    @Override
     public void stop() {
         LOGGER.info("Stopping agent linker");
 

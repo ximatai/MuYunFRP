@@ -19,8 +19,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class TunnelLinker extends AbstractVerticle {
-    private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinker.class);
+public class TunnelLinkerVerticle extends AbstractVerticle {
+    private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinkerVerticle.class);
     private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
     private static final int REQUEST_TIMEOUT = 30000; // 30秒请求超时
 
@@ -38,7 +38,7 @@ public class TunnelLinker extends AbstractVerticle {
     // 存储用户请求上下文 (requestId -> RequestContext)
     private final Map<String, RequestContext> pendingRequests = new ConcurrentHashMap<>();
 
-    public TunnelLinker(Vertx vertx, Tunnel tunnel) {
+    public TunnelLinkerVerticle(Vertx vertx, Tunnel tunnel) {
         this.vertx = vertx;
         this.tunnel = tunnel;
     }
@@ -293,7 +293,7 @@ public class TunnelLinker extends AbstractVerticle {
             if (!client.isClosed()) {
                 try {
                     client.writeBinaryMessage(frameData);
-                    LOGGER.trace("Forwarded {} bytes to client {} for request {}",
+                    LOGGER.debug("Forwarded {} bytes to client {} for request {}",
                             data.length(), clientId, requestId);
                 } catch (Exception ex) {
                     LOGGER.error("Failed to forward data to client {}", clientId, ex);

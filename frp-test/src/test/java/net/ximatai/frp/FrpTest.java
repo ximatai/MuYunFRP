@@ -12,7 +12,7 @@ import net.ximatai.frp.agent.config.ProxyType;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
 import net.ximatai.frp.mock.MockServerVerticle;
 import net.ximatai.frp.server.config.Tunnel;
-import net.ximatai.frp.server.service.TunnelLinker;
+import net.ximatai.frp.server.service.TunnelLinkerVerticle;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -74,9 +74,9 @@ class FrpTest {
             }
         };
 
-        TunnelLinker tunnelLinker = new TunnelLinker(vertx, testTunnel);
+        TunnelLinkerVerticle tunnelLinkerVerticle = new TunnelLinkerVerticle(vertx, testTunnel);
 
-        vertx.deployVerticle(tunnelLinker).toCompletionStage().toCompletableFuture().join();
+        vertx.deployVerticle(tunnelLinkerVerticle).toCompletionStage().toCompletableFuture().join();
 
         LOGGER.info("TunnelLinker success.");
 
@@ -158,14 +158,18 @@ class FrpTest {
                 .statusCode(200)
                 .body(is("hello"));
 
-//        given()
-//                .contentType("application/json")
-//                .body(Map.of("name", "frp"))
-//                .when()
-//                .post("http://localhost:%s/test".formatted(frpTunnelOpenPort))
-//                .then()
-//                .statusCode(200)
-//                .body(is("hello frp"));
+        System.out.println("===");
+
+        given()
+                .contentType("application/json")
+                .body(Map.of("name", "frp"))
+                .when()
+                .post("http://localhost:%s/test".formatted(frpTunnelOpenPort))
+                .then()
+                .statusCode(200)
+                .body(is("hello frp"));
+
+        System.out.println("===");
     }
 
 }
