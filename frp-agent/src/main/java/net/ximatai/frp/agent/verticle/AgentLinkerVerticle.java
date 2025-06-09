@@ -3,7 +3,6 @@ package net.ximatai.frp.agent.verticle;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
-import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.WebSocket;
 import io.vertx.core.http.WebSocketClientOptions;
@@ -18,7 +17,7 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 public class AgentLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentLinkerVerticle.class);
@@ -30,11 +29,10 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
     // 重连配置
     private static final long INITIAL_RECONNECT_DELAY = 1000; // 初始重连延迟(ms)
-    private static final long MAX_RECONNECT_DELAY = 60000;    // 最大重连延迟(ms)
+    private static final long MAX_RECONNECT_DELAY = 10000;    // 最大重连延迟(ms)
     private static final double RECONNECT_BACKOFF_FACTOR = 1.5; // 重连退避因子
     private static final long HEARTBEAT_INTERVAL = 30000;      // 30秒心跳
 
-    private final Vertx vertx;
     private final Agent agent;
     private WebSocket controlSocket;
 
@@ -48,8 +46,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     private int reconnectAttempts = 0;
     private long nextReconnectDelay = INITIAL_RECONNECT_DELAY;
 
-    public AgentLinkerVerticle(Vertx vertx, Agent agent) {
-        this.vertx = vertx;
+    public AgentLinkerVerticle(Agent agent) {
         this.agent = agent;
     }
 
@@ -194,12 +191,14 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                                 socket.closeHandler(v -> {
                                     LOGGER.debug("Target service connection closed for request: {}", requestId);
                                     closeRequestConnection(requestId);
+                                    notifyServerOfConnectionFailure(requestId);
                                 });
 
                                 // 处理目标服务异常
                                 socket.exceptionHandler(ex -> {
                                     LOGGER.error("Target service connection error for request: {}", requestId, ex);
                                     closeRequestConnection(requestId);
+                                    notifyServerOfConnectionFailure(requestId);
                                 });
 
                                 lock.release();
@@ -291,7 +290,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
         try {
             controlSocket.writeBinaryMessage(frame);
-            LOGGER.trace("Sent {} bytes to server for request {}", data.length(), requestId);
+            LOGGER.debug("Sent {} bytes to server for request {}", data.length(), requestId);
         } catch (Exception ex) {
             LOGGER.error("Failed to send data to server for request: {}", requestId, ex);
             closeRequestConnection(requestId);
@@ -367,10 +366,11 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
         LOGGER.info("Scheduling reconnect attempt #{} in {}ms", reconnectAttempts, delay);
 
-        vertx.setTimer(delay, tid -> {
-            LOGGER.info("Attempting reconnect to FRP server");
-            connectToFrpTunnel();
-        });
+        vertx.timer(delay, TimeUnit.MILLISECONDS)
+                .onSuccess(tid -> {
+                    LOGGER.info("Attempting reconnect to FRP server");
+                    connectToFrpTunnel();
+                });
     }
 
     private Buffer createCloseFrame(String requestId) {
@@ -389,7 +389,9 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     private WebSocketClientOptions options(FrpTunnel server) {
         return new WebSocketClientOptions()
                 .setDefaultHost(server.host())
-                .setDefaultPort(server.port());
+                .setDefaultPort(server.port())
+                .setTcpKeepAlive(true)
+                .setMaxFrameSize(65536 * 2);
     }
 
     @Override

@@ -122,7 +122,7 @@ class FrpTest {
             }
         };
 
-        AgentLinkerVerticle agentLinkerVerticle = new AgentLinkerVerticle(vertx, testAgent);
+        AgentLinkerVerticle agentLinkerVerticle = new AgentLinkerVerticle(testAgent);
 
         vertx.deployVerticle(agentLinkerVerticle).toCompletionStage().toCompletableFuture().join();
 

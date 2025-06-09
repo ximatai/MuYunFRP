@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TunnelLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinkerVerticle.class);
     private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
-    private static final int REQUEST_TIMEOUT = 30000; // 30秒请求超时
+    private static final int REQUEST_TIMEOUT = 60000 * 60; // 60分钟请求超时
 
     // 协议常量
     private static final byte CONNECT = 0x01;
@@ -67,7 +67,9 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         Promise<Void> promise = Promise.promise();
 
         HttpServerOptions options = new HttpServerOptions()
-                .setRegisterWebSocketWriteHandlers(true);
+                .setRegisterWebSocketWriteHandlers(true)
+                .setMaxWebSocketFrameSize(65536 * 2);
+
         HttpServer server = vertx.createHttpServer(options);
 
         server

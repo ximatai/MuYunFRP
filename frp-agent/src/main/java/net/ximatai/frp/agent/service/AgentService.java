@@ -28,7 +28,7 @@ public class AgentService {
         LOGGER.info("Need Link Agent Size is {}", agentConfig.agents().size());
 
         agentConfig.agents().forEach(agent -> {
-            AgentLinkerVerticle linker = new AgentLinkerVerticle(vertx, agent);
+            AgentLinkerVerticle linker = new AgentLinkerVerticle(agent);
             vertx.deployVerticle(linker);
         });
 
