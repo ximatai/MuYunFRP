@@ -27,7 +27,7 @@ import static org.hamcrest.CoreMatchers.is;
 
 @QuarkusTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class FrpTest {
+class WebFrpTest {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
     private static final int mockServerPort = 7788;
