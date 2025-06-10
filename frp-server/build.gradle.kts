@@ -2,10 +2,12 @@ plugins {
     alias(libs.plugins.quarkus)
 }
 
-tasks.named<Jar>("jar") {
-    archiveBaseName.set("muyun-frp-server")
+quarkus {
+    val version = project.version.toString()
+    quarkusBuildProperties.set(mapOf(
+        "quarkus.package.output-name" to "muyun-frp-server-$version"
+    ))
 }
-
 
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.platform.bom))
