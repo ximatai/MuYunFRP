@@ -17,7 +17,7 @@ allprojects {
     }
 
     group = "net.ximatai.frp"
-    version = "1.0.0-SNAPSHOT"
+    version = "1.26.1"
 
     java {
         sourceCompatibility = JavaVersion.VERSION_21
