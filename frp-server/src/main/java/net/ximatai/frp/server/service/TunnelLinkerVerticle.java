@@ -33,7 +33,8 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
     private final Tunnel tunnel;
 
     // 存储客户端WebSocket连接 (clientId -> WebSocket)
-    private final Map<String, ServerWebSocket> activeClients = new ConcurrentHashMap<>();
+//    private final Map<String, ServerWebSocket> activeClients = new ConcurrentHashMap<>();
+    private ServerWebSocket activeClient;
 
     // 存储用户请求上下文 (requestId -> RequestContext)
     private final Map<String, RequestContext> pendingRequests = new ConcurrentHashMap<>();
@@ -79,21 +80,21 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                     LOGGER.info("FRP Client connected: {} @ {}", clientId, webSocket.remoteAddress());
 
                     // 将新客户端添加到活跃列表
-                    activeClients.put(clientId, webSocket);
+                    activeClient = webSocket;
 
                     // 设置消息处理器
                     webSocket.frameHandler(frame -> handleClientFrame(clientId, frame));
 
                     // 设置关闭处理器
                     webSocket.closeHandler(v -> {
-                        activeClients.remove(clientId);
+                        activeClient = null;
                         LOGGER.warn("FRP Client disconnected: {}", clientId);
                     });
 
                     // 设置异常处理器
                     webSocket.exceptionHandler(ex -> {
                         LOGGER.error("WebSocket error for client {}", clientId, ex);
-                        activeClients.remove(clientId);
+                        activeClient = null;
                         webSocket.close();
                     });
 
@@ -185,13 +186,13 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
     private void handleClientFrame(String clientId, WebSocketFrame frame) {
         if (frame.isClose()) {
-            activeClients.remove(clientId);
+            activeClient = null;
             return;
         }
 
         if (frame.isPing()) {
             LOGGER.debug("Received PING from client {}", clientId);
-            ServerWebSocket ws = activeClients.get(clientId);
+            ServerWebSocket ws = activeClient;
             if (ws != null) {
                 ws.writePong(Buffer.buffer("pong"));
             }
@@ -266,7 +267,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         }
 
         // 2. 如果客户端不可用，关闭用户连接
-        if (activeClients.isEmpty()) {
+        if (activeClient == null) {
             RequestContext ctx = pendingRequests.remove(requestId);
             if (ctx != null) {
                 vertx.cancelTimer(ctx.getTimeoutId());
@@ -291,28 +292,25 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         frameData.appendBuffer(data);
 
         // 4. 发送给所有可用客户端
-        activeClients.forEach((clientId, client) -> {
-            if (!client.isClosed()) {
-                try {
-                    client.writeBinaryMessage(frameData);
-                    LOGGER.debug("Forwarded {} bytes to client {} for request {}",
-                            data.length(), clientId, requestId);
-                } catch (Exception ex) {
-                    LOGGER.error("Failed to forward data to client {}", clientId, ex);
-                }
+
+        if (!activeClient.isClosed()) {
+            try {
+                activeClient.writeBinaryMessage(frameData);
+                LOGGER.debug("Forwarded {} bytes to client {} for request {}",
+                        data.length(), activeClient.hashCode(), requestId);
+            } catch (Exception ex) {
+                LOGGER.error("Failed to forward data to client {}", activeClient.hashCode(), ex);
             }
-        });
+        }
+
     }
 
     private boolean forwardRequestToClient(String requestId, NetSocket userSocket) {
-        if (activeClients.isEmpty()) {
+        if (activeClient == null) {
             return false;
         }
 
-        // 1. 选择第一个可用客户端
-        ServerWebSocket client = activeClients.values().iterator().next();
-
-        if (client.isClosed()) {
+        if (activeClient.isClosed()) {
             return false;
         }
 
@@ -329,7 +327,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
             frame.appendLong(uuid.getLeastSignificantBits());
 
             // 3. 发送给客户端
-            client.writeBinaryMessage(frame);
+            activeClient.writeBinaryMessage(frame);
             return true;
         } catch (Exception ex) {
             LOGGER.error("Failed to notify client about new request", ex);
@@ -350,16 +348,16 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         frame.appendLong(uuid.getLeastSignificantBits());
 
         // 2. 发送给所有客户端
-        activeClients.forEach((clientId, client) -> {
-            if (!client.isClosed()) {
-                try {
-                    client.writeBinaryMessage(frame);
-                    LOGGER.debug("Sent CLOSE signal to client {} for request {}", clientId, requestId);
-                } catch (Exception ex) {
-                    LOGGER.error("Failed to send close signal to client {}", clientId, ex);
-                }
+
+        if (!activeClient.isClosed()) {
+            try {
+                activeClient.writeBinaryMessage(frame);
+                LOGGER.debug("Sent CLOSE signal to client {} for request {}", activeClient.hashCode(), requestId);
+            } catch (Exception ex) {
+                LOGGER.error("Failed to send close signal to client {}", activeClient.hashCode(), ex);
             }
-        });
+        }
+
     }
 
     private void setupHeartbeat(ServerWebSocket webSocket, String clientId) {
@@ -379,7 +377,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 vertx.cancelTimer(id);
 
                 // 清理资源
-                activeClients.remove(clientId);
+                activeClient = null;
                 try {
                     webSocket.close();
                 } catch (Exception ignore) {
