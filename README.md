@@ -96,7 +96,7 @@ java -jar muyun-frp-agent-x.x.x-runner.jar
 2. 如果想定制更负责的日志输出，可以参考`./frp-server/src/main/resources/application-demo.yml`文件内容。
 3. 如果遇到启动失败，请检查端口占用情况。典型的报错信息为：`java.net.BindException: Address already in use`
 
-### For Develop
+### For Developer
 
 运行单元测试
 
