@@ -33,6 +33,9 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     private static final double RECONNECT_BACKOFF_FACTOR = 1.5; // 重连退避因子
     private static final long HEARTBEAT_INTERVAL = 30000;      // 30秒心跳
 
+    private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
+    private static final int CONTROL_WIDTH = 17; // 标志位一个字节，UUID 16个字节
+
     private final Agent agent;
     private WebSocket controlSocket;
 
@@ -138,7 +141,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                     break;
 
                 case DATA:
-                    LOGGER.trace("Received DATA for request: {} ({} bytes)", requestId, payload != null ? payload.length() : 0);
+                    LOGGER.debug("Received DATA for request: {} ({} bytes)", requestId, payload != null ? payload.length() : 0);
                     handleDataRequest(requestId, payload);
                     break;
 
@@ -180,6 +183,11 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                                 // 处理目标服务的数据
                                 socket.handler(data -> {
                                     try {
+                                        while ((data.length() + CONTROL_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
+                                            sendDataToServer(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH));
+                                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH, data.length());
+                                        }
+
                                         sendDataToServer(requestId, data);
                                     } catch (Exception ex) {
                                         LOGGER.error("Error sending data to server", ex);
@@ -230,7 +238,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                     try {
                         if (data != null && data.length() > 0) {
                             targetSocket.write(data);
-                            LOGGER.trace("Forwarded {} bytes to target service for request {}", data.length(), requestId);
+                            LOGGER.debug("Forwarded {} bytes to target service for request {}", data.length(), requestId);
                         }
                     } catch (Exception ex) {
                         LOGGER.error("Failed to write data to target service for request: {}", requestId, ex);
@@ -391,7 +399,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                 .setDefaultHost(server.host())
                 .setDefaultPort(server.port())
                 .setTcpKeepAlive(true)
-                .setMaxFrameSize(65536 * 2);
+                .setMaxFrameSize(MAX_WEBSOCKET_FRAME_SIZE);
     }
 
     @Override

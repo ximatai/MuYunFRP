@@ -190,7 +190,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         }
 
         if (frame.isPing()) {
-            LOGGER.trace("Received PING from client {}", clientId);
+            LOGGER.debug("Received PING from client {}", clientId);
             ServerWebSocket ws = activeClients.get(clientId);
             if (ws != null) {
                 ws.writePong(Buffer.buffer("pong"));
@@ -199,7 +199,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         }
 
         if (frame.type().equals(WebSocketFrameType.PONG)) {
-            LOGGER.trace("Received PONG from client {}", clientId);
+            LOGGER.debug("Received PONG from client {}", clientId);
             return;
         }
 
@@ -237,7 +237,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 case DATA:
                     if (payload != null) {
                         context.getSocket().write(payload);
-                        LOGGER.trace("Forwarded {} bytes to user for request {}", payload.length(), requestId);
+                        LOGGER.debug("Forwarded {} bytes to user for request {}", payload.length(), requestId);
                     }
                     break;
 
