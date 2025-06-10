@@ -18,3 +18,12 @@ quarkus:
     console:
       enable: true
       format: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{3.}] (%t) Line:%L - %s%e%n"
+    file:
+      enable: true
+      path: logs/frp-server.log
+      level: DEBUG
+      format: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{3.}] (%t) Line:%L - %s%e%n"
+      rotation:
+        file-suffix: .yyyy-MM-dd
+        rotate-on-boot: true
+        max-backup-index: 7
