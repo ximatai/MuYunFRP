@@ -74,7 +74,7 @@ frp-agent:
 路径存放：
 
 ```
-./your-server-folder/
+./your-agent-folder/
    ├── muyun-frp-agent-x.x.x-runner.jar     # MuYun FRP Agent JAR
    └── config/                               # 配置文件夹      
       └── application.yml                    # 配置文件
