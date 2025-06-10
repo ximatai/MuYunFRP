@@ -27,8 +27,6 @@ jobs:
     needs: check  # 依赖检查任务先通过
     if: startsWith(github.ref, 'refs/tags/v')  # 标签过滤
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # 允许创建 Release 和上传文件
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 21
@@ -60,5 +58,3 @@ jobs:
             ${{ steps.find-artifacts.outputs.server_jar }}
             ${{ steps.find-artifacts.outputs.agent_jar }}
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 使用默认Token
