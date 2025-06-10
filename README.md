@@ -91,7 +91,7 @@ java -jar muyun-frp-agent-x.x.x-runner.jar
 1. 如果需要把`jar`当做服务持续启动的话，可以参考下面的命令：
 
     ```shell
-    nohu java -jar muyun-frp-agent-x.x.x-runner.jar & 
+    nohup java -jar muyun-frp-agent-x.x.x-runner.jar > /dev/null 2>&1 & 
     ```
 2. 如果想定制更负责的日志输出，可以参考`./frp-server/src/main/resources/application-demo.yml`文件内容。
 3. 如果遇到启动失败，请检查端口占用情况。典型的报错信息为：`java.net.BindException: Address already in use`
