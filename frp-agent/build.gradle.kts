@@ -2,6 +2,10 @@ plugins {
     alias(libs.plugins.quarkus)
 }
 
+tasks.named<Jar>("jar") {
+    archiveBaseName.set("muyun-frp-agent")
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.platform.bom))
     implementation("io.quarkus:quarkus-config-yaml")

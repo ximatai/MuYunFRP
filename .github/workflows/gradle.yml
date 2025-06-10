@@ -47,8 +47,11 @@ jobs:
       - name: Find Artifacts
         id: find-artifacts
         run: |
-          echo "server_jar=$(find frp-server/build -name '*-runner.jar')" >> $GITHUB_OUTPUT
-          echo "agent_jar=$(find frp-agent/build -name '*-runner.jar')" >> $GITHUB_OUTPUT
+          echo "server_jar=frp-server/build/*-runner.jar" >> $GITHUB_OUTPUT
+          echo "agent_jar=frp-agent/build/*-runner.jar" >> $GITHUB_OUTPUT
+      
+          echo "Selected files:"
+          ls frp-server/build/*-runner.jar frp-agent/build/*-runner.jar
 
       # 创建Release
       - name: Create GitHub Release
