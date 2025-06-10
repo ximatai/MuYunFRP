@@ -17,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 public class AgentLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentLinkerVerticle.class);
@@ -27,11 +26,8 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     private static final byte DATA = 0x02;
     private static final byte CLOSE = 0x03;
 
-    // 重连配置
-    private static final long INITIAL_RECONNECT_DELAY = 1000; // 初始重连延迟(ms)
-    private static final long MAX_RECONNECT_DELAY = 10000;    // 最大重连延迟(ms)
-    private static final double RECONNECT_BACKOFF_FACTOR = 1.5; // 重连退避因子
     private static final long HEARTBEAT_INTERVAL = 30000;      // 30秒心跳
+    private static final long LIVE_CHECK_INTERVAL = 10000;      // 10秒保活检查
 
     private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
     private static final int CONTROL_WIDTH = 17; // 标志位一个字节，UUID 16个字节
@@ -42,13 +38,6 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     // 存储请求映射 (requestId -> NetSocket连接到目标服务)
     private final Map<String, NetSocket> pendingRequests = new HashMap<>();
 
-    // 心跳计时器ID
-    private Long heartbeatTimerId;
-
-    // 重连相关状态
-    private int reconnectAttempts = 0;
-    private long nextReconnectDelay = INITIAL_RECONNECT_DELAY;
-
     public AgentLinkerVerticle(Agent agent) {
         this.agent = agent;
     }
@@ -57,6 +46,31 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     public void start(Promise<Void> startPromise) {
         connectToFrpTunnel()
                 .onComplete(startPromise);
+
+        vertx.setPeriodic(LIVE_CHECK_INTERVAL, timerId -> {
+            if (this.controlSocket == null) {
+                connectToFrpTunnel();
+            }
+        });
+
+        vertx.setPeriodic(HEARTBEAT_INTERVAL, id -> {
+            try {
+                if (controlSocket == null) return;
+
+                controlSocket.writePing(Buffer.buffer("ping-" + System.currentTimeMillis()));
+                LOGGER.trace("Sent heartbeat PING to server");
+            } catch (Exception ex) {
+                LOGGER.error("Failed to send heartbeat", ex);
+                handleConnectionLoss();
+            }
+        });
+    }
+
+    private void setControlSocket(WebSocket controlSocket) {
+        if (this.controlSocket != null && !this.controlSocket.isClosed()) {
+            this.controlSocket.close();
+        }
+        this.controlSocket = controlSocket;
     }
 
     private Future<Void> connectToFrpTunnel() {
@@ -66,43 +80,40 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
         LOGGER.info("Connecting to FRP tunnel at {}:{}", frpTunnel.host(), frpTunnel.port());
 
-        vertx.createWebSocketClient(options(frpTunnel))
-                .connect("/")
-                .onSuccess(ws -> {
-                    LOGGER.info("Successfully connected to FRP server");
+        vertx.sharedData().getLock("frp-agent-lock")
+                .onSuccess(lock -> {
+                    vertx.createWebSocketClient(options(frpTunnel))
+                            .connect("/")
+                            .onSuccess(ws -> {
+                                LOGGER.info("Successfully connected to FRP server");
 
-                    // 重置重连状态
-                    reconnectAttempts = 0;
-                    nextReconnectDelay = INITIAL_RECONNECT_DELAY;
+                                // 保存控制通道socket
+                                setControlSocket(ws);
 
-                    // 保存控制通道socket
-                    controlSocket = ws;
+                                // 设置帧处理器
+                                ws.frameHandler(this::handleServerFrame);
 
-                    // 设置帧处理器
-                    ws.frameHandler(this::handleServerFrame);
+                                // 设置关闭处理器
+                                ws.closeHandler(v -> {
+                                    LOGGER.warn("Connection to FRP server closed");
+                                    handleConnectionLoss();
+                                });
 
-                    // 设置关闭处理器
-                    ws.closeHandler(v -> {
-                        LOGGER.warn("Connection to FRP server closed");
-                        handleConnectionLoss(true);
-                    });
+                                // 设置异常处理器
+                                ws.exceptionHandler(ex -> {
+                                    LOGGER.error("WebSocket connection error", ex);
+                                    ws.close();
+                                    handleConnectionLoss();
+                                });
 
-                    // 设置异常处理器
-                    ws.exceptionHandler(ex -> {
-                        LOGGER.error("WebSocket connection error", ex);
-                        ws.close();
-                        handleConnectionLoss(false);
-                    });
-
-                    // 启用心跳检测
-                    startHeartbeat();
-
-                    promise.complete();
-                })
-                .onFailure(t -> {
-                    LOGGER.error("Failed to connect to FRP server", t);
-                    scheduleReconnect();
-                    promise.fail(t);
+                                promise.complete();
+                                lock.release();
+                            })
+                            .onFailure(t -> {
+                                LOGGER.error("Failed to connect to FRP server", t);
+                                promise.fail(t);
+                                lock.release();
+                            });
                 });
 
         return promise.future();
@@ -305,40 +316,9 @@ public class AgentLinkerVerticle extends AbstractVerticle {
         }
     }
 
-    private void startHeartbeat() {
-        // 取消现有的心跳计时器
-        stopHeartbeat();
+    private void handleConnectionLoss() {
 
-        heartbeatTimerId = vertx.setPeriodic(HEARTBEAT_INTERVAL, id -> {
-            if (controlSocket == null || controlSocket.isClosed()) {
-                LOGGER.warn("Control channel not active, stopping heartbeat");
-                stopHeartbeat();
-                return;
-            }
-
-            try {
-                // 发送PING帧保持连接
-                controlSocket.writePing(Buffer.buffer("ping-" + System.currentTimeMillis()));
-                LOGGER.trace("Sent heartbeat PING to server");
-            } catch (Exception ex) {
-                LOGGER.error("Failed to send heartbeat", ex);
-                stopHeartbeat();
-                handleConnectionLoss(false);
-            }
-        });
-    }
-
-    private void stopHeartbeat() {
-        if (heartbeatTimerId != null) {
-            vertx.cancelTimer(heartbeatTimerId);
-            heartbeatTimerId = null;
-        }
-    }
-
-    private void handleConnectionLoss(boolean asPlanned) {
-        if (!asPlanned) {
-            LOGGER.error("Connection to FRP server lost");
-        }
+        LOGGER.error("Connection to FRP server lost");
 
         // 关闭所有目标服务连接
         for (NetSocket socket : pendingRequests.values()) {
@@ -347,38 +327,10 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             } catch (Exception ignore) {
             }
         }
+
         pendingRequests.clear();
 
-        // 停止心跳
-        stopHeartbeat();
-
-        // 重置控制通道
-        controlSocket = null;
-
-        if (!asPlanned) {
-            // 计划外尝试重新连接
-            scheduleReconnect();
-        }
-
-    }
-
-    private void scheduleReconnect() {
-        // 指数退避策略
-        long delay = nextReconnectDelay;
-        nextReconnectDelay = (long) Math.min(
-                MAX_RECONNECT_DELAY,
-                delay * RECONNECT_BACKOFF_FACTOR
-        );
-
-        reconnectAttempts++;
-
-        LOGGER.info("Scheduling reconnect attempt #{} in {}ms", reconnectAttempts, delay);
-
-        vertx.timer(delay, TimeUnit.MILLISECONDS)
-                .onSuccess(tid -> {
-                    LOGGER.info("Attempting reconnect to FRP server");
-                    connectToFrpTunnel();
-                });
+        setControlSocket(null);
     }
 
     private Buffer createCloseFrame(String requestId) {
@@ -424,11 +376,5 @@ public class AgentLinkerVerticle extends AbstractVerticle {
         }
         pendingRequests.clear();
 
-        // 停止心跳
-        stopHeartbeat();
-
-        // 重置重连状态
-        reconnectAttempts = 0;
-        nextReconnectDelay = INITIAL_RECONNECT_DELAY;
     }
 }

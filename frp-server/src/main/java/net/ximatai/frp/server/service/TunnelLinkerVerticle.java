@@ -21,13 +21,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TunnelLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinkerVerticle.class);
-    private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
-    private static final int REQUEST_TIMEOUT = 60000 * 60; // 60分钟请求超时
 
     // 协议常量
     private static final byte CONNECT = 0x01;
     private static final byte DATA = 0x02;
     private static final byte CLOSE = 0x03;
+
+    private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
+    private static final int REQUEST_TIMEOUT = 60000 * 60; // 60分钟请求超时
+
+    private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
+    private static final int CONTROL_WIDTH = 17; // 标志位一个字节，UUID 16个字节
 
     private final Vertx vertx;
     private final Tunnel tunnel;
@@ -69,7 +73,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
         HttpServerOptions options = new HttpServerOptions()
                 .setRegisterWebSocketWriteHandlers(true)
-                .setMaxWebSocketFrameSize(65536 * 2);
+                .setMaxWebSocketFrameSize(MAX_WEBSOCKET_FRAME_SIZE);
 
         HttpServer server = vertx.createHttpServer(options);
 
@@ -150,7 +154,14 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                     }
 
                     // 处理用户数据
-                    userSocket.handler(data -> handleUserData(requestId, data));
+                    userSocket.handler(data -> {
+                        while ((data.length() + CONTROL_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
+                            handleUserData(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH));
+                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH, data.length());
+                        }
+
+                        handleUserData(requestId, data);
+                    });
 
                     // 处理用户关闭
                     userSocket.closeHandler(v -> {
