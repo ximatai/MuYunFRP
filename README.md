@@ -1,8 +1,8 @@
-# muyun-frp
+# MuYun-FRP
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+一套基于 Java 打造的 FRP 服务，轻便易用。
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+![FRP](https://github.com/user-attachments/assets/f4817a58-d26d-425f-af48-abf2ec077de9)
 
 ## Creating a native executable
 
