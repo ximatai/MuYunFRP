@@ -1,16 +1,15 @@
 package net.ximatai.frp;
 
 import io.quarkus.test.junit.QuarkusTest;
-import io.restassured.RestAssured;
-import io.restassured.config.HttpClientConfig;
 import io.vertx.core.Vertx;
+import io.vertx.junit5.VertxTestContext;
 import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.Agent;
 import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
 import net.ximatai.frp.agent.config.ProxyType;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
-import net.ximatai.frp.mock.MockWebServerVerticle;
+import net.ximatai.frp.mock.MockTcpServerVerticle;
 import net.ximatai.frp.server.config.Tunnel;
 import net.ximatai.frp.server.service.TunnelLinkerVerticle;
 import org.junit.jupiter.api.Assertions;
@@ -20,27 +19,16 @@ import org.junit.jupiter.api.TestInstance;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Map;
-
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.CoreMatchers.is;
+import java.util.concurrent.TimeUnit;
 
 @QuarkusTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class WebFrpTest {
+class TcpFrpTest {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private static final int mockServerPort = 7788;
-    private static final int frpTunnelAgentPort = 8083;
-    private static final int frpTunnelOpenPort = 8082;
-
-    static {
-        RestAssured.config = RestAssured.config()
-                .httpClient(HttpClientConfig.httpClientConfig()
-                        .setParam("http.connection.timeout", 1)
-                        .setParam("http.socket.timeout", 3)
-                );
-    }
+    private static final int mockServerPort = 17788;
+    private static final int frpTunnelAgentPort = 18083;
+    private static final int frpTunnelOpenPort = 18082;
 
     @Inject
     Vertx vertx;
@@ -48,9 +36,7 @@ class WebFrpTest {
     @BeforeAll
     void beforeAll() {
 
-        Assertions.assertFalse(Boolean.getBoolean("vertx.disableWebsockets"));
-
-        vertx.deployVerticle(new MockWebServerVerticle(mockServerPort))
+        vertx.deployVerticle(new MockTcpServerVerticle(mockServerPort))
                 .toCompletionStage()
                 .toCompletableFuture()
                 .join();
@@ -83,7 +69,7 @@ class WebFrpTest {
         Agent testAgent = new Agent() {
             @Override
             public ProxyType type() {
-                return ProxyType.http;
+                return ProxyType.tcp;
             }
 
             @Override
@@ -126,35 +112,39 @@ class WebFrpTest {
     }
 
     @Test
-    void testMockServer() {
+    void testMockServer() throws InterruptedException {
         testWithPort(mockServerPort);
     }
 
     @Test
-    void testFrpServer() {
+    void testFrpServer() throws InterruptedException {
         testWithPort(frpTunnelOpenPort);
     }
 
-    private void testWithPort(int port) {
-        given()
-                .when()
-                .get("http://localhost:%s/test".formatted(port))
-                .then()
-                .statusCode(200)
-                .body(is("hello"));
+    private void testWithPort(int port) throws InterruptedException {
+        VertxTestContext testContext = new VertxTestContext();
 
-        System.out.println("===");
+        String text = "hello world!";
 
-        given()
-                .contentType("application/json")
-                .body(Map.of("name", "frp"))
-                .when()
-                .post("http://localhost:%s/test".formatted(port))
-                .then()
-                .statusCode(200)
-                .body(is("hello frp"));
+        vertx.createNetClient()
+                .connect(port, "127.0.0.1")
+                .onSuccess(socket -> {
+                    socket.write(text);
 
-        System.out.println("===");
+                    socket.handler(buffer -> {
+                        testContext.verify(() -> {
+                            Assertions.assertEquals(text, buffer.toString());
+                            testContext.completeNow();
+                        });
+                    });
+                })
+                .onFailure(testContext::failNow);
+
+        testContext.awaitCompletion(10, TimeUnit.SECONDS);
+
+        if (testContext.failed()) {
+            throw new AssertionError(testContext.causeOfFailure());
+        }
     }
 
 }

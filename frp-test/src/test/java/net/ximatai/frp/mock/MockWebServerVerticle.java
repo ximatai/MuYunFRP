@@ -7,13 +7,13 @@ import io.vertx.ext.web.handler.BodyHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class MockServerVerticle extends AbstractVerticle {
+public class MockWebServerVerticle extends AbstractVerticle {
 
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
     private final int port;
 
-    public MockServerVerticle(int port) {
+    public MockWebServerVerticle(int port) {
         this.port = port;
     }
 
