@@ -12,6 +12,7 @@ import io.vertx.core.http.WebSocketFrame;
 import io.vertx.core.http.WebSocketFrameType;
 import io.vertx.core.net.NetSocket;
 import net.ximatai.frp.server.config.Tunnel;
+import net.ximatai.frp.shared.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,16 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TunnelLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinkerVerticle.class);
 
-    // 协议常量
-    private static final byte CONNECT = 0x01;
-    private static final byte DATA = 0x02;
-    private static final byte CLOSE = 0x03;
-
-    private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
     private static final int REQUEST_TIMEOUT = 60000 * 60; // 60分钟请求超时
-
-    private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
-    private static final int CONTROL_WIDTH = 17; // 标志位一个字节，UUID 16个字节
 
     private final Vertx vertx;
     private final Tunnel tunnel;
@@ -73,7 +65,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
         HttpServerOptions options = new HttpServerOptions()
                 .setRegisterWebSocketWriteHandlers(true)
-                .setMaxWebSocketFrameSize(MAX_WEBSOCKET_FRAME_SIZE);
+                .setMaxWebSocketFrameSize(Constants.MAX_WEBSOCKET_FRAME_SIZE);
 
         HttpServer server = vertx.createHttpServer(options);
 
@@ -155,9 +147,9 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
                     // 处理用户数据
                     userSocket.handler(data -> {
-                        while ((data.length() + CONTROL_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
-                            handleUserData(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH));
-                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH, data.length());
+                        while ((data.length() + Constants.CONTROL_WIDTH) > Constants.MAX_WEBSOCKET_FRAME_SIZE) {
+                            handleUserData(requestId, data.slice(0, Constants.MAX_WEBSOCKET_FRAME_SIZE - Constants.CONTROL_WIDTH));
+                            data = data.slice(Constants.MAX_WEBSOCKET_FRAME_SIZE - Constants.CONTROL_WIDTH, data.length());
                         }
 
                         handleUserData(requestId, data);
@@ -246,14 +238,14 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
             }
 
             switch (opCode) {
-                case DATA:
+                case Constants.DATA:
                     if (payload != null) {
                         context.getSocket().write(payload);
                         LOGGER.debug("Forwarded {} bytes to user for request {}", payload.length(), requestId);
                     }
                     break;
 
-                case CLOSE:
+                case Constants.CLOSE:
                     RequestContext ctx = pendingRequests.remove(requestId);
                     if (ctx != null) {
                         vertx.cancelTimer(ctx.getTimeoutId());
@@ -292,7 +284,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         Buffer frameData = Buffer.buffer(1 + 16 + data.length());
 
         // 添加操作码
-        frameData.appendByte(DATA);
+        frameData.appendByte(Constants.DATA);
 
         // 添加请求ID (16字节)
         UUID uuid = UUID.fromString(requestId);
@@ -330,7 +322,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
             Buffer frame = Buffer.buffer(17);
 
             // 添加操作码
-            frame.appendByte(CONNECT);
+            frame.appendByte(Constants.CONNECT);
 
             // 添加请求ID (16字节)
             UUID uuid = UUID.fromString(requestId);
@@ -351,7 +343,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         Buffer frame = Buffer.buffer(17);
 
         // 添加操作码
-        frame.appendByte(CLOSE);
+        frame.appendByte(Constants.CLOSE);
 
         // 添加请求ID (16字节)
         UUID uuid = UUID.fromString(requestId);
@@ -373,7 +365,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
     private void setupHeartbeat(ServerWebSocket webSocket, String clientId) {
         // 1. 设置心跳发送定时器
-        long timerId = vertx.setPeriodic(HEARTBEAT_INTERVAL, id -> {
+        long timerId = vertx.setPeriodic(Constants.HEARTBEAT_INTERVAL, id -> {
             if (webSocket.isClosed()) {
                 vertx.cancelTimer(id);
                 return;

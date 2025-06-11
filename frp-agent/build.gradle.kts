@@ -10,6 +10,7 @@ quarkus {
 }
 
 dependencies {
+    implementation(project(":frp-shared"))
     implementation(enforcedPlatform(libs.quarkus.platform.bom))
     implementation("io.quarkus:quarkus-config-yaml")
     implementation("io.quarkus:quarkus-arc")

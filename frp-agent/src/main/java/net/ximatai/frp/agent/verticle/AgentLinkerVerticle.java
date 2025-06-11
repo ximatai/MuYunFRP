@@ -11,6 +11,7 @@ import io.vertx.core.net.NetSocket;
 import net.ximatai.frp.agent.config.Agent;
 import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
+import net.ximatai.frp.shared.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,16 +22,7 @@ import java.util.UUID;
 public class AgentLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentLinkerVerticle.class);
 
-    // 协议常量（必须与服务器端匹配）
-    private static final byte CONNECT = 0x01;
-    private static final byte DATA = 0x02;
-    private static final byte CLOSE = 0x03;
-
-    private static final long HEARTBEAT_INTERVAL = 30000;      // 30秒心跳
     private static final long LIVE_CHECK_INTERVAL = 10000;      // 10秒保活检查
-
-    private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
-    private static final int CONTROL_WIDTH = 17; // 标志位一个字节，UUID 16个字节
 
     private final Agent agent;
     private WebSocket controlSocket;
@@ -53,7 +45,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             }
         });
 
-        vertx.setPeriodic(HEARTBEAT_INTERVAL, id -> {
+        vertx.setPeriodic(Constants.HEARTBEAT_INTERVAL, id -> {
             try {
                 if (controlSocket == null) return;
 
@@ -146,17 +138,17 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             Buffer payload = data.length() > 17 ? data.getBuffer(17, data.length()) : null;
 
             switch (opCode) {
-                case CONNECT:
+                case Constants.CONNECT:
                     LOGGER.debug("Received CONNECT command for request: {}", requestId);
                     handleConnectRequest(requestId);
                     break;
 
-                case DATA:
+                case Constants.DATA:
                     LOGGER.debug("Received DATA for request: {} ({} bytes)", requestId, payload != null ? payload.length() : 0);
                     handleDataRequest(requestId, payload);
                     break;
 
-                case CLOSE:
+                case Constants.CLOSE:
                     LOGGER.debug("Received CLOSE command for request: {}", requestId);
                     handleCloseRequest(requestId);
                     break;
@@ -194,9 +186,9 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                                 // 处理目标服务的数据
                                 socket.handler(data -> {
                                     try {
-                                        while ((data.length() + CONTROL_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
-                                            sendDataToServer(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH));
-                                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH, data.length());
+                                        while ((data.length() + Constants.CONTROL_WIDTH) > Constants.MAX_WEBSOCKET_FRAME_SIZE) {
+                                            sendDataToServer(requestId, data.slice(0, Constants.MAX_WEBSOCKET_FRAME_SIZE - Constants.CONTROL_WIDTH));
+                                            data = data.slice(Constants.MAX_WEBSOCKET_FRAME_SIZE - Constants.CONTROL_WIDTH, data.length());
                                         }
 
                                         sendDataToServer(requestId, data);
@@ -303,7 +295,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
         // 构建数据帧：操作码 + 请求ID + 有效载荷
         Buffer frame = Buffer.buffer(17 + data.length());
-        frame.appendByte(DATA);
+        frame.appendByte(Constants.DATA);
         appendUUID(frame, requestId);
         frame.appendBuffer(data);
 
@@ -335,7 +327,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
     private Buffer createCloseFrame(String requestId) {
         Buffer frame = Buffer.buffer(17);
-        frame.appendByte(CLOSE);
+        frame.appendByte(Constants.CLOSE);
         appendUUID(frame, requestId);
         return frame;
     }
@@ -351,7 +343,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                 .setDefaultHost(server.host())
                 .setDefaultPort(server.port())
                 .setTcpKeepAlive(true)
-                .setMaxFrameSize(MAX_WEBSOCKET_FRAME_SIZE);
+                .setMaxFrameSize(Constants.MAX_WEBSOCKET_FRAME_SIZE);
     }
 
     @Override
