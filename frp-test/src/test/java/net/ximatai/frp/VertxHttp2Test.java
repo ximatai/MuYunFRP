@@ -34,9 +34,7 @@ public class VertxHttp2Test {
         // 配置 HTTP/2 客户端选项
         HttpClientOptions options = new HttpClientOptions()
                 .setProtocolVersion(io.vertx.core.http.HttpVersion.HTTP_2)
-//                .setSsl(true)
-                .setUseAlpn(true)
-                .setTrustAll(true); // 仅用于测试，生产环境不要使用
+                .setUseAlpn(true);
 
         HttpClient client = vertx.createHttpClient(options);
 
