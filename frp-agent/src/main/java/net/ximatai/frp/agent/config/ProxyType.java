@@ -2,7 +2,7 @@ package net.ximatai.frp.agent.config;
 
 public enum ProxyType {
     tcp,
-    upd,
+    udp,
     http,
     https
 }
