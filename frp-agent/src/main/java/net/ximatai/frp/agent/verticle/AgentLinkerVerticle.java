@@ -11,6 +11,8 @@ import io.vertx.core.net.NetSocket;
 import net.ximatai.frp.agent.config.Agent;
 import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
+import net.ximatai.frp.common.MessageUtil;
+import net.ximatai.frp.common.OperationType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,19 +20,15 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import static net.ximatai.frp.common.MessageUtil.OPERATION_WIDTH;
+
 public class AgentLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentLinkerVerticle.class);
-
-    // 协议常量（必须与服务器端匹配）
-    private static final byte CONNECT = 0x01;
-    private static final byte DATA = 0x02;
-    private static final byte CLOSE = 0x03;
 
     private static final long HEARTBEAT_INTERVAL = 30000;      // 30秒心跳
     private static final long LIVE_CHECK_INTERVAL = 10000;      // 10秒保活检查
 
     private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
-    private static final int CONTROL_WIDTH = 17; // 标志位一个字节，UUID 16个字节
 
     private final Agent agent;
     private WebSocket controlSocket;
@@ -127,25 +125,25 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             Buffer data = frame.binaryData();
 
             // 检查最小长度（至少包含操作码+UUID长度）
-            if (data.length() < 17) {
+            if (data.length() < OPERATION_WIDTH) {
                 LOGGER.error("Invalid frame length from server: {}", data.length());
                 return;
             }
 
             // 解析操作码
-            byte opCode = data.getByte(0);
+            OperationType operationType = OperationType.fromValue(data.getByte(0));
 
             // 解析请求ID（16字节的UUID）
-            Buffer requestIdBuffer = data.getBuffer(1, 17);
+            Buffer requestIdBuffer = data.getBuffer(1, OPERATION_WIDTH);
             String requestId = new UUID(
                     requestIdBuffer.getLong(0),
                     requestIdBuffer.getLong(8)
             ).toString();
 
             // 解析有效载荷（如果存在）
-            Buffer payload = data.length() > 17 ? data.getBuffer(17, data.length()) : null;
+            Buffer payload = data.length() > OPERATION_WIDTH ? data.getBuffer(OPERATION_WIDTH, data.length()) : null;
 
-            switch (opCode) {
+            switch (operationType) {
                 case CONNECT:
                     LOGGER.debug("Received CONNECT command for request: {}", requestId);
                     handleConnectRequest(requestId);
@@ -162,7 +160,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                     break;
 
                 default:
-                    LOGGER.warn("Unknown op code {} from server", opCode);
+                    LOGGER.warn("Unknown op code {} from server", operationType);
             }
         } catch (Exception ex) {
             LOGGER.error("Error processing server frame", ex);
@@ -194,9 +192,9 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                                 // 处理目标服务的数据
                                 socket.handler(data -> {
                                     try {
-                                        while ((data.length() + CONTROL_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
-                                            sendDataToServer(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH));
-                                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH, data.length());
+                                        while ((data.length() + OPERATION_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
+                                            sendDataToServer(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - OPERATION_WIDTH));
+                                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - OPERATION_WIDTH, data.length());
                                         }
 
                                         sendDataToServer(requestId, data);
@@ -278,12 +276,9 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     }
 
     private void notifyServerOfConnectionFailure(String requestId) {
-        // 创建关闭帧通知服务器
-        Buffer frame = createCloseFrame(requestId);
-
         try {
             if (controlSocket != null && !controlSocket.isClosed()) {
-                controlSocket.writeBinaryMessage(frame);
+                controlSocket.writeBinaryMessage(MessageUtil.buildOperationMessage(requestId, OperationType.CLOSE));
                 LOGGER.debug("Notified server of connection failure for request: {}", requestId);
             }
         } catch (Exception ex) {
@@ -301,14 +296,8 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             return;
         }
 
-        // 构建数据帧：操作码 + 请求ID + 有效载荷
-        Buffer frame = Buffer.buffer(17 + data.length());
-        frame.appendByte(DATA);
-        appendUUID(frame, requestId);
-        frame.appendBuffer(data);
-
         try {
-            controlSocket.writeBinaryMessage(frame);
+            controlSocket.writeBinaryMessage(MessageUtil.buildDataMessage(requestId, data));
             LOGGER.debug("Sent {} bytes to server for request {}", data.length(), requestId);
         } catch (Exception ex) {
             LOGGER.error("Failed to send data to server for request: {}", requestId, ex);
@@ -331,19 +320,6 @@ public class AgentLinkerVerticle extends AbstractVerticle {
         pendingRequests.clear();
 
         setControlSocket(null);
-    }
-
-    private Buffer createCloseFrame(String requestId) {
-        Buffer frame = Buffer.buffer(17);
-        frame.appendByte(CLOSE);
-        appendUUID(frame, requestId);
-        return frame;
-    }
-
-    private void appendUUID(Buffer buffer, String requestId) {
-        UUID uuid = UUID.fromString(requestId);
-        buffer.appendLong(uuid.getMostSignificantBits());
-        buffer.appendLong(uuid.getLeastSignificantBits());
     }
 
     private WebSocketClientOptions options(FrpTunnel server) {

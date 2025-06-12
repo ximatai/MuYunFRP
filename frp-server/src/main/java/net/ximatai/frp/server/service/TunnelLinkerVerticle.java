@@ -11,6 +11,8 @@ import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.http.WebSocketFrame;
 import io.vertx.core.http.WebSocketFrameType;
 import io.vertx.core.net.NetSocket;
+import net.ximatai.frp.common.MessageUtil;
+import net.ximatai.frp.common.OperationType;
 import net.ximatai.frp.server.config.Tunnel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,25 +21,19 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static net.ximatai.frp.common.MessageUtil.OPERATION_WIDTH;
+
 public class TunnelLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinkerVerticle.class);
-
-    // 协议常量
-    private static final byte CONNECT = 0x01;
-    private static final byte DATA = 0x02;
-    private static final byte CLOSE = 0x03;
 
     private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
     private static final int REQUEST_TIMEOUT = 60000 * 60; // 60分钟请求超时
 
     private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
-    private static final int CONTROL_WIDTH = 17; // 标志位一个字节，UUID 16个字节
 
     private final Vertx vertx;
     private final Tunnel tunnel;
 
-    // 存储客户端WebSocket连接 (clientId -> WebSocket)
-//    private final Map<String, ServerWebSocket> activeClients = new ConcurrentHashMap<>();
     private ServerWebSocket activeClient;
 
     // 存储用户请求上下文 (requestId -> RequestContext)
@@ -155,9 +151,9 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
                     // 处理用户数据
                     userSocket.handler(data -> {
-                        while ((data.length() + CONTROL_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
-                            handleUserData(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH));
-                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - CONTROL_WIDTH, data.length());
+                        while ((data.length() + OPERATION_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
+                            handleUserData(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - OPERATION_WIDTH));
+                            data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - OPERATION_WIDTH, data.length());
                         }
 
                         handleUserData(requestId, data);
@@ -203,9 +199,8 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
         if (frame.isPing()) {
             LOGGER.debug("Received PING from client {}", clientId);
-            ServerWebSocket ws = activeClient;
-            if (ws != null) {
-                ws.writePong(Buffer.buffer("pong"));
+            if (activeClient != null) {
+                activeClient.writePong(Buffer.buffer("pong"));
             }
             return;
         }
@@ -221,23 +216,23 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
             Buffer data = frame.binaryData();
 
             // 检查最小长度（至少包含操作码+UUID长度）
-            if (data.length() < 17) {
+            if (data.length() < OPERATION_WIDTH) {
                 LOGGER.error("Invalid frame length from client {}: {}", clientId, data.length());
                 return;
             }
 
             // 解析操作码
-            byte opCode = data.getByte(0);
+            OperationType operationType = OperationType.fromValue(data.getByte(0));
 
             // 解析请求ID（16字节的UUID）
-            Buffer requestIdBuffer = data.getBuffer(1, 17);
+            Buffer requestIdBuffer = data.getBuffer(1, OPERATION_WIDTH);
             String requestId = new UUID(
                     requestIdBuffer.getLong(0),
                     requestIdBuffer.getLong(8)
             ).toString();
 
             // 解析有效载荷（如果存在）
-            Buffer payload = data.length() > 17 ? data.getBuffer(17, data.length()) : null;
+            Buffer payload = data.length() > OPERATION_WIDTH ? data.getBuffer(OPERATION_WIDTH, data.length()) : null;
 
             RequestContext context = pendingRequests.get(requestId);
             if (context == null || context.isClosed()) {
@@ -245,7 +240,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 return;
             }
 
-            switch (opCode) {
+            switch (operationType) {
                 case DATA:
                     if (payload != null) {
                         context.getSocket().write(payload);
@@ -263,7 +258,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                     break;
 
                 default:
-                    LOGGER.warn("Unknown op code {} from client {}", opCode, clientId);
+                    LOGGER.warn("Unknown op code {} from client {}", operationType, clientId);
             }
         } catch (Exception ex) {
             LOGGER.error("Error processing client frame", ex);
@@ -277,68 +272,27 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
             return;
         }
 
-        // 2. 如果客户端不可用，关闭用户连接
-        if (activeClient == null) {
-            RequestContext ctx = pendingRequests.remove(requestId);
-            if (ctx != null) {
-                vertx.cancelTimer(ctx.getTimeoutId());
-                ctx.getSocket().close();
-                LOGGER.error("No active clients while forwarding data for {}", requestId);
-            }
+        if (!checkClientAlive(requestId)) {
             return;
         }
 
-        // 3. 构造数据帧：操作码(1字节) + 请求ID(16字节) + 数据
-        Buffer frameData = Buffer.buffer(1 + 16 + data.length());
-
-        // 添加操作码
-        frameData.appendByte(DATA);
-
-        // 添加请求ID (16字节)
-        UUID uuid = UUID.fromString(requestId);
-        frameData.appendLong(uuid.getMostSignificantBits());
-        frameData.appendLong(uuid.getLeastSignificantBits());
-
-        // 添加实际数据
-        frameData.appendBuffer(data);
-
-        // 4. 发送给所有可用客户端
-
-        if (!activeClient.isClosed()) {
-            try {
-                activeClient.writeBinaryMessage(frameData);
-                LOGGER.debug("Forwarded {} bytes to client {} for request {}",
-                        data.length(), activeClient.hashCode(), requestId);
-            } catch (Exception ex) {
-                LOGGER.error("Failed to forward data to client {}", activeClient.hashCode(), ex);
-            }
+        try {
+            activeClient.writeBinaryMessage(MessageUtil.buildDataMessage(requestId, data));
+            LOGGER.debug("Forwarded {} bytes to client {} for request {}",
+                    data.length(), activeClient.hashCode(), requestId);
+        } catch (Exception ex) {
+            LOGGER.error("Failed to forward data to client {}", activeClient.hashCode(), ex);
         }
 
     }
 
     private boolean forwardRequestToClient(String requestId, NetSocket userSocket) {
-        if (activeClient == null) {
-            return false;
-        }
-
-        if (activeClient.isClosed()) {
+        if (!checkClientAlive(requestId)) {
             return false;
         }
 
         try {
-            // 2. 构造连接帧：操作码(1字节) + 请求ID(16字节)
-            Buffer frame = Buffer.buffer(17);
-
-            // 添加操作码
-            frame.appendByte(CONNECT);
-
-            // 添加请求ID (16字节)
-            UUID uuid = UUID.fromString(requestId);
-            frame.appendLong(uuid.getMostSignificantBits());
-            frame.appendLong(uuid.getLeastSignificantBits());
-
-            // 3. 发送给客户端
-            activeClient.writeBinaryMessage(frame);
+            activeClient.writeBinaryMessage(MessageUtil.buildOperationMessage(requestId, OperationType.CONNECT));
             return true;
         } catch (Exception ex) {
             LOGGER.error("Failed to notify client about new request", ex);
@@ -347,28 +301,29 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
     }
 
     private void sendCloseSignalToClient(String requestId) {
-        // 1. 构造关闭帧：操作码(1字节) + 请求ID(16字节)
-        Buffer frame = Buffer.buffer(17);
 
-        // 添加操作码
-        frame.appendByte(CLOSE);
-
-        // 添加请求ID (16字节)
-        UUID uuid = UUID.fromString(requestId);
-        frame.appendLong(uuid.getMostSignificantBits());
-        frame.appendLong(uuid.getLeastSignificantBits());
-
-        // 2. 发送给所有客户端
-
-        if (!activeClient.isClosed()) {
+        if (checkClientAlive(requestId)) {
             try {
-                activeClient.writeBinaryMessage(frame);
+                activeClient.writeBinaryMessage(MessageUtil.buildOperationMessage(requestId, OperationType.CLOSE));
                 LOGGER.debug("Sent CLOSE signal to client {} for request {}", activeClient.hashCode(), requestId);
             } catch (Exception ex) {
                 LOGGER.error("Failed to send close signal to client {}", activeClient.hashCode(), ex);
             }
         }
 
+    }
+
+    private boolean checkClientAlive(String requestId) {
+        if (activeClient == null) {
+            RequestContext ctx = pendingRequests.remove(requestId);
+            if (ctx != null) {
+                vertx.cancelTimer(ctx.getTimeoutId());
+                ctx.getSocket().close();
+                LOGGER.error("No active clients while forwarding data for {}", requestId);
+            }
+            return false;
+        }
+        return !activeClient.isClosed();
     }
 
     private void setupHeartbeat(ServerWebSocket webSocket, String clientId) {
