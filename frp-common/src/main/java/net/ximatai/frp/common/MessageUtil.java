@@ -36,4 +36,20 @@ public class MessageUtil {
 
         return frame;
     }
+
+    public static OperationType getOperationType(Buffer data) {
+        return OperationType.fromValue(data.getByte(0));
+    }
+
+    public static String getRequestId(Buffer data) {
+        Buffer requestIdBuffer = data.getBuffer(1, OPERATION_WIDTH);
+        return new UUID(
+                requestIdBuffer.getLong(0),
+                requestIdBuffer.getLong(8)
+        ).toString();
+    }
+
+    public static Buffer getPayload(Buffer data) {
+        return data.getBuffer(OPERATION_WIDTH, data.length());
+    }
 }

@@ -221,18 +221,9 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 return;
             }
 
-            // 解析操作码
-            OperationType operationType = OperationType.fromValue(data.getByte(0));
-
-            // 解析请求ID（16字节的UUID）
-            Buffer requestIdBuffer = data.getBuffer(1, OPERATION_WIDTH);
-            String requestId = new UUID(
-                    requestIdBuffer.getLong(0),
-                    requestIdBuffer.getLong(8)
-            ).toString();
-
-            // 解析有效载荷（如果存在）
-            Buffer payload = data.length() > OPERATION_WIDTH ? data.getBuffer(OPERATION_WIDTH, data.length()) : null;
+            OperationType operationType = MessageUtil.getOperationType(data);
+            String requestId = MessageUtil.getRequestId(data);
+            Buffer payload = MessageUtil.getPayload(data);
 
             RequestContext context = pendingRequests.get(requestId);
             if (context == null || context.isClosed()) {
