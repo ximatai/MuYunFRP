@@ -1,21 +1,13 @@
 [versions]
-testcontainers = "1.20.3"
 quarkus = "3.23.2"
-yasson = "3.0.4"
 jackson = "2.19.0"
-bcprov = "1.80"
-caffeine = "3.2.0"
-codec = "1.18.0"
+verx = "4.5.15"
+
 
 [libraries]
-testcontainers-postgresql = { module = "org.testcontainers:postgresql", version.ref = "testcontainers" }
+vertx-core = { module = "io.vertx:vertx-core", version.ref = "verx" }
 quarkus-platform-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
-yasson = { module = "org.eclipse:yasson", version.ref = "yasson" }
-bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bcprov" }
-caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeine" }
-commons-codes = { module = "commons-codec:commons-codec", version.ref = "codec" }
-easyCaptcha = { module = "com.github.whvcse:easy-captcha", version = "1.6.2" }
 
 [plugins]
 quarkus = { id = "io.quarkus", version.ref = "quarkus" }
