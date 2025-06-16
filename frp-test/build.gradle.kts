@@ -5,6 +5,7 @@ plugins {
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.platform.bom))
 
+    testImplementation(project(":frp-common"))
     testImplementation(project(":frp-server"))
     testImplementation(project(":frp-agent"))
 

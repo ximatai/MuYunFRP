@@ -8,8 +8,8 @@ import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.Agent;
 import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
-import net.ximatai.frp.agent.config.ProxyType;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
+import net.ximatai.frp.common.ProxyType;
 import net.ximatai.frp.mock.MockWebServerVerticle;
 import net.ximatai.frp.server.config.Tunnel;
 import net.ximatai.frp.server.service.TunnelLinkerVerticle;
@@ -57,22 +57,7 @@ class WebFrpTest {
 
         LOGGER.info("mockServer deploy success.");
 
-        Tunnel testTunnel = new Tunnel() {
-            @Override
-            public String name() {
-                return "test";
-            }
-
-            @Override
-            public int openPort() {
-                return frpTunnelOpenPort;
-            }
-
-            @Override
-            public int agentPort() {
-                return frpTunnelAgentPort;
-            }
-        };
+        Tunnel testTunnel = Tunnel.createRecord("测试", ProxyType.http, frpTunnelOpenPort, frpTunnelAgentPort);
 
         TunnelLinkerVerticle tunnelLinkerVerticle = new TunnelLinkerVerticle(vertx, testTunnel);
 

@@ -1,4 +1,4 @@
-package net.ximatai.frp.agent.config;
+package net.ximatai.frp.common;
 
 public enum ProxyType {
     tcp,

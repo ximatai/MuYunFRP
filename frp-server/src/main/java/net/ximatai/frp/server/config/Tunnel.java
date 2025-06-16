@@ -1,5 +1,7 @@
 package net.ximatai.frp.server.config;
 
+import net.ximatai.frp.common.ProxyType;
+
 public interface Tunnel {
 
     /**
@@ -8,6 +10,8 @@ public interface Tunnel {
      * @return 隧道名称
      */
     String name();
+
+    ProxyType type();
 
     /**
      * 对外暴露的代理端口，开放给用户访问
@@ -24,10 +28,14 @@ public interface Tunnel {
     int agentPort();
 
     default TunnelRecord toRecord() {
-        return new TunnelRecord(name(), openPort(), agentPort());
+        return new TunnelRecord(name(), type(), openPort(), agentPort());
     }
 
-    record TunnelRecord(String name, int openPort, int agentPort) implements Tunnel {
+    static Tunnel createRecord(String name, ProxyType type, int openPort, int agentPort) {
+        return new TunnelRecord(name, type, openPort, agentPort);
+    }
+
+    record TunnelRecord(String name, ProxyType type, int openPort, int agentPort) implements Tunnel {
     }
 
 }
