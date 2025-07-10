@@ -17,6 +17,8 @@ variables:
 check:
   <<: *check_template
   stage: check
+  tags:
+    - host
   script:
     - ./gradlew test
   rules:
@@ -27,6 +29,8 @@ check:
 release:
   <<: *check_template
   stage: release
+  tags:
+    - host
   needs: ["check"]
   script:
     - ./gradlew :frp-server:build -Dquarkus.package.jar.type=uber-jar
