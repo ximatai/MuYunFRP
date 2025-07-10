@@ -1,0 +1,41 @@
+stages:
+  - check
+  - release
+
+variables:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+
+.check_template: &check_template
+  before_script:
+    - chmod +x gradlew
+  cache:
+    key: "$CI_COMMIT_REF_NAME"
+    paths:
+      - .gradle
+      - build
+
+check:
+  <<: *check_template
+  stage: check
+  script:
+    - ./gradlew test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+
+release:
+  <<: *check_template
+  stage: release
+  needs: ["check"]
+  script:
+    - ./gradlew :frp-server:build -Dquarkus.package.jar.type=uber-jar
+    - ./gradlew :frp-agent:build -Dquarkus.package.jar.type=uber-jar
+    - ls frp-server/build/*-runner.jar frp-agent/build/*-runner.jar
+  artifacts:
+    paths:
+      - frp-server/build/*-runner.jar
+      - frp-agent/build/*-runner.jar
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'

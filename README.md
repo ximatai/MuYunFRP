@@ -33,6 +33,7 @@ frp-server:
     port: 8089
   tunnels:
     - name: 测试
+      type: tcp
       open-port: 8082
       agent-port: 8083
 
