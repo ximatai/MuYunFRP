@@ -4,6 +4,8 @@ stages:
 
 variables:
   GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  GIT_DEPTH: 0  # 禁用浅克隆，解决 fetch-pack 错误
+  GIT_STRATEGY: fetch  # 使用 fetch 而不是默认的 clone
 
 .check_template: &check_template
   before_script:
