@@ -6,6 +6,7 @@ import io.restassured.config.HttpClientConfig;
 import io.vertx.core.Vertx;
 import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.Agent;
+import net.ximatai.frp.agent.config.Auth;
 import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
@@ -72,6 +73,11 @@ class WebFrpTest {
             }
 
             @Override
+            public String agentName() {
+                return "web-test-agent";
+            }
+
+            @Override
             public FrpTunnel frpTunnel() {
                 return new FrpTunnel() {
                     @Override
@@ -84,6 +90,11 @@ class WebFrpTest {
                         return frpTunnelAgentPort;
                     }
                 };
+            }
+
+            @Override
+            public Auth auth() {
+                return () -> "test-token";
             }
 
             @Override

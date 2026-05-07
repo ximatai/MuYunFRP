@@ -22,4 +22,7 @@ dependencies {
     implementation("io.quarkus:quarkus-websockets")
     implementation(libs.jackson.databind)
 
+    testImplementation("io.quarkus:quarkus-junit5")
+    testImplementation("io.rest-assured:rest-assured")
+
 }

@@ -5,6 +5,7 @@ import io.vertx.core.Vertx;
 import io.vertx.junit5.VertxTestContext;
 import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.Agent;
+import net.ximatai.frp.agent.config.Auth;
 import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
@@ -58,6 +59,11 @@ class TcpFrpTest {
             }
 
             @Override
+            public String agentName() {
+                return "tcp-test-agent";
+            }
+
+            @Override
             public FrpTunnel frpTunnel() {
                 return new FrpTunnel() {
                     @Override
@@ -70,6 +76,11 @@ class TcpFrpTest {
                         return frpTunnelAgentPort;
                     }
                 };
+            }
+
+            @Override
+            public Auth auth() {
+                return () -> "test-token";
             }
 
             @Override

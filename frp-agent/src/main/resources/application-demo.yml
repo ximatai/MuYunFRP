@@ -1,8 +1,11 @@
 frp-agent:
   type: tcp
+  agent-name: home-agent
   frp-tunnel:
     host: 127.0.0.1
     port: 8083
+  auth:
+    token: ${FRP_AGENT_TUNNEL_TOKEN}
   proxy:
     host: 192.168.6.203
     port: 22

@@ -1,0 +1,127 @@
+package net.ximatai.frp.server.service;
+
+import jakarta.enterprise.context.ApplicationScoped;
+import net.ximatai.frp.common.ProxyType;
+import net.ximatai.frp.server.config.Tunnel;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+@ApplicationScoped
+public class TunnelRuntimeRegistry {
+    private final Map<String, TunnelRuntime> runtimes = new ConcurrentHashMap<>();
+
+    public void registerTunnel(Tunnel tunnel) {
+        runtimes.putIfAbsent(tunnel.name(), TunnelRuntime.offline(tunnel));
+    }
+
+    public void markAgentOnline(Tunnel tunnel, String agentName, String sessionId) {
+        runtimes.put(tunnel.name(), TunnelRuntime.online(tunnel, agentName, sessionId, 0));
+    }
+
+    public void markAgentOffline(Tunnel tunnel, String sessionId) {
+        runtimes.compute(tunnel.name(), (name, current) -> {
+            if (current == null || (current.sessionId() != null && !current.sessionId().equals(sessionId))) {
+                return current;
+            }
+            return TunnelRuntime.offline(tunnel);
+        });
+    }
+
+    public void updateActiveConnections(Tunnel tunnel, String sessionId, int activeConnections) {
+        runtimes.computeIfPresent(tunnel.name(), (name, current) -> {
+            if (current.sessionId() == null || !current.sessionId().equals(sessionId)) {
+                return current;
+            }
+            return current.withActiveConnections(activeConnections);
+        });
+    }
+
+    public void touchAgent(Tunnel tunnel, String sessionId) {
+        runtimes.computeIfPresent(tunnel.name(), (name, current) -> {
+            if (current.sessionId() == null || !current.sessionId().equals(sessionId)) {
+                return current;
+            }
+            return current.withLastSeenAt(Instant.now());
+        });
+    }
+
+    public List<TunnelRuntime> list(List<Tunnel> tunnels) {
+        return tunnels.stream()
+                .map(tunnel -> runtimes.getOrDefault(tunnel.name(), TunnelRuntime.offline(tunnel)))
+                .toList();
+    }
+
+    public record TunnelRuntime(
+            String name,
+            ProxyType type,
+            int openPort,
+            int agentPort,
+            boolean tokenConfigured,
+            boolean agentOnline,
+            String agentName,
+            String sessionId,
+            int activeConnections,
+            Instant connectedAt,
+            Instant lastSeenAt
+    ) {
+        static TunnelRuntime offline(Tunnel tunnel) {
+            return new TunnelRuntime(
+                    tunnel.name(),
+                    tunnel.type(),
+                    tunnel.openPort(),
+                    tunnel.agentPort(),
+                    true,
+                    false,
+                    null,
+                    null,
+                    0,
+                    null,
+                    null
+            );
+        }
+
+        static TunnelRuntime online(Tunnel tunnel, String agentName, String sessionId, int activeConnections) {
+            Instant now = Instant.now();
+            return new TunnelRuntime(
+                    tunnel.name(),
+                    tunnel.type(),
+                    tunnel.openPort(),
+                    tunnel.agentPort(),
+                    true,
+                    true,
+                    agentName,
+                    sessionId,
+                    activeConnections,
+                    now,
+                    now
+            );
+        }
+
+        TunnelRuntime withActiveConnections(int activeConnections) {
+            return with(activeConnections, Instant.now());
+        }
+
+        TunnelRuntime withLastSeenAt(Instant lastSeenAt) {
+            return with(activeConnections, lastSeenAt);
+        }
+
+        private TunnelRuntime with(int activeConnections, Instant lastSeenAt) {
+            return new TunnelRuntime(
+                    name,
+                    type,
+                    openPort,
+                    agentPort,
+                    tokenConfigured,
+                    agentOnline,
+                    agentName,
+                    sessionId,
+                    activeConnections,
+                    connectedAt,
+                    lastSeenAt
+            );
+        }
+    }
+}

@@ -7,7 +7,11 @@ import net.ximatai.frp.common.ProxyType;
 public interface Agent {
     ProxyType type();
 
+    String agentName();
+
     FrpTunnel frpTunnel();
+
+    Auth auth();
 
     ProxyServer proxy();
 }

@@ -10,6 +10,7 @@ import io.vertx.core.http.HttpServerOptions;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.http.WebSocketFrame;
 import io.vertx.core.http.WebSocketFrameType;
+import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.NetSocket;
 import net.ximatai.frp.common.MessageUtil;
 import net.ximatai.frp.common.OperationType;
@@ -17,6 +18,7 @@ import net.ximatai.frp.server.config.Tunnel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -26,34 +28,37 @@ import static net.ximatai.frp.common.MessageUtil.OPERATION_WIDTH;
 public class TunnelLinkerVerticle extends AbstractVerticle {
     private static final Logger LOGGER = LoggerFactory.getLogger(TunnelLinkerVerticle.class);
 
-    private static final long HEARTBEAT_INTERVAL = 30000; // 30秒心跳
-    private static final int REQUEST_TIMEOUT = 60000 * 60; // 60分钟请求超时
-
-    private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
+    private static final long HEARTBEAT_INTERVAL = 30000;
+    public static final long AUTH_TIMEOUT = Long.getLong("muyun.frp.auth.timeout", 5000L);
+    private static final int REQUEST_TIMEOUT = 60000 * 60;
+    private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536;
+    private static final int PROTOCOL_VERSION = 1;
 
     private final Vertx vertx;
     private final Tunnel tunnel;
+    private final TunnelRuntimeRegistry runtimeRegistry;
 
-    private ServerWebSocket activeClient;
-
-    // 存储用户请求上下文 (requestId -> RequestContext)
+    private volatile AgentSession activeSession;
     private final Map<String, RequestContext> pendingRequests = new ConcurrentHashMap<>();
 
     public TunnelLinkerVerticle(Vertx vertx, Tunnel tunnel) {
+        this(vertx, tunnel, new TunnelRuntimeRegistry());
+    }
+
+    public TunnelLinkerVerticle(Vertx vertx, Tunnel tunnel, TunnelRuntimeRegistry runtimeRegistry) {
         this.vertx = vertx;
         this.tunnel = tunnel;
+        this.runtimeRegistry = runtimeRegistry;
+        this.runtimeRegistry.registerTunnel(tunnel);
     }
 
     @Override
     public void start(Promise<Void> startPromise) {
-        int openPort = tunnel.openPort();
-        int agentPort = tunnel.agentPort();
-
         LOGGER.info("Try To Link {}, OpenPort is {}, AgentPort is {}",
-                tunnel.name(), openPort, agentPort);
+                tunnel.name(), tunnel.openPort(), tunnel.agentPort());
 
-        createAgentServer(agentPort)
-                .compose(v -> createPublicServer(openPort))
+        createAgentServer(tunnel.agentPort())
+                .compose(v -> createPublicServer(tunnel.openPort()))
                 .onSuccess(v -> {
                     LOGGER.info("Link {} Success", tunnel.name());
                     startPromise.complete();
@@ -66,47 +71,32 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
     private Future<Void> createAgentServer(int port) {
         Promise<Void> promise = Promise.promise();
-
         HttpServerOptions options = new HttpServerOptions()
                 .setRegisterWebSocketWriteHandlers(true)
                 .setMaxWebSocketFrameSize(MAX_WEBSOCKET_FRAME_SIZE);
 
         HttpServer server = vertx.createHttpServer(options);
+        server.webSocketHandler(webSocket -> {
+                    AgentSession session = new AgentSession(UUID.randomUUID().toString(), webSocket);
+                    LOGGER.info("FRP Agent connected before auth: {} @ {}", session.sessionId, webSocket.remoteAddress());
 
-        server
-                .webSocketHandler(webSocket -> {
-                    // 客户端连接处理
-                    String clientId = UUID.randomUUID().toString();
-                    LOGGER.info("FRP Client connected: {} @ {}", clientId, webSocket.remoteAddress());
-
-                    // 将新客户端添加到活跃列表
-                    activeClient = webSocket;
-
-                    // 设置消息处理器
-                    webSocket.frameHandler(frame -> handleClientFrame(clientId, frame));
-
-                    // 设置关闭处理器
-                    webSocket.closeHandler(v -> {
-                        activeClient = null;
-                        LOGGER.warn("FRP Client disconnected: {}", clientId);
+                    session.authTimerId = vertx.setTimer(AUTH_TIMEOUT, id -> {
+                        if (!session.authenticated) {
+                            LOGGER.warn("FRP Agent auth timeout: {}", session.sessionId);
+                            closeWebSocket(webSocket);
+                        }
                     });
+                    session.heartbeatTimerId = setupHeartbeat(session);
 
-                    // 设置异常处理器
+                    webSocket.frameHandler(frame -> handleAgentFrame(session, frame));
+                    webSocket.closeHandler(v -> handleSessionClosed(session));
                     webSocket.exceptionHandler(ex -> {
-                        LOGGER.error("WebSocket error for client {}", clientId, ex);
-                        activeClient = null;
-                        webSocket.close();
+                        LOGGER.error("WebSocket error for agent session {}", session.sessionId, ex);
+                        closeWebSocket(webSocket);
                     });
-
-                    // 启用心跳检测
-                    setupHeartbeat(webSocket, clientId);
                 })
-                .invalidRequestHandler(request -> {
-                    LOGGER.error("Invalid request: {}", request.uri());
-                })
-                .exceptionHandler(err -> {
-                    LOGGER.error("Server error", err);
-                })
+                .invalidRequestHandler(request -> LOGGER.error("Invalid request: {}", request.uri()))
+                .exceptionHandler(err -> LOGGER.error("Server error", err))
                 .listen(port)
                 .onSuccess(s -> {
                     LOGGER.info("Agent server listening on port {}", port);
@@ -122,60 +112,57 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
 
     private Future<Void> createPublicServer(int port) {
         Promise<Void> promise = Promise.promise();
-
         vertx.createNetServer()
                 .connectHandler(userSocket -> {
-                    // 生成唯一请求ID
-                    String requestId = UUID.randomUUID().toString();
-
-                    LOGGER.debug("New user request: {}", requestId);
-
-                    // 保存请求上下文
-                    RequestContext context = new RequestContext(requestId, userSocket);
-                    pendingRequests.put(requestId, context);
-
-                    // 设置用户连接超时
-                    context.setTimeoutId(vertx.setTimer(REQUEST_TIMEOUT, tid -> {
-                        if (pendingRequests.remove(requestId) != null) {
-                            userSocket.close();
-                            LOGGER.warn("Request timed out: {}", requestId);
-                        }
-                    }));
-
-                    // 将请求转发给代理客户端
-                    if (!forwardRequestToClient(requestId, userSocket)) {
-                        pendingRequests.remove(requestId);
+                    AgentSession session = authenticatedSession();
+                    if (session == null) {
+                        LOGGER.error("No authenticated agent for tunnel {}, closing user connection", tunnel.name());
                         userSocket.close();
-                        LOGGER.error("No available clients for request: {}", requestId);
+                        return;
                     }
 
-                    // 处理用户数据
+                    String requestId = UUID.randomUUID().toString();
+                    LOGGER.debug("New user request: {}", requestId);
+
+                    RequestContext context = new RequestContext(requestId, session.sessionId, userSocket);
+                    pendingRequests.put(requestId, context);
+                    updateActiveConnections(session.sessionId);
+
+                    context.timeoutId = vertx.setTimer(REQUEST_TIMEOUT, tid -> {
+                        RequestContext removed = pendingRequests.remove(requestId);
+                        if (removed != null) {
+                            removed.closed = true;
+                            userSocket.close();
+                            sendCloseSignalToAgent(removed);
+                            updateActiveConnections(removed.sessionId);
+                            LOGGER.warn("Request timed out: {}", requestId);
+                        }
+                    });
+
+                    if (!forwardRequestToAgent(context)) {
+                        cleanupRequest(requestId, false);
+                        userSocket.close();
+                        LOGGER.error("No available authenticated agent for request: {}", requestId);
+                        return;
+                    }
+
                     userSocket.handler(data -> {
                         while ((data.length() + OPERATION_WIDTH) > MAX_WEBSOCKET_FRAME_SIZE) {
                             handleUserData(requestId, data.slice(0, MAX_WEBSOCKET_FRAME_SIZE - OPERATION_WIDTH));
                             data = data.slice(MAX_WEBSOCKET_FRAME_SIZE - OPERATION_WIDTH, data.length());
                         }
-
                         handleUserData(requestId, data);
                     });
 
-                    // 处理用户关闭
                     userSocket.closeHandler(v -> {
-                        RequestContext ctx = pendingRequests.remove(requestId);
-                        if (ctx != null) {
-                            vertx.cancelTimer(ctx.getTimeoutId());
-                            sendCloseSignalToClient(requestId);
-                        }
+                        context.closed = true;
+                        cleanupRequest(requestId, true);
                     });
 
-                    // 处理用户异常
                     userSocket.exceptionHandler(ex -> {
-                        RequestContext ctx = pendingRequests.remove(requestId);
-                        if (ctx != null) {
-                            vertx.cancelTimer(ctx.getTimeoutId());
-                            sendCloseSignalToClient(requestId);
-                            LOGGER.error("User connection exception: {}", requestId, ex);
-                        }
+                        context.closed = true;
+                        cleanupRequest(requestId, true);
+                        LOGGER.error("User connection exception: {}", requestId, ex);
                     });
                 })
                 .listen(port)
@@ -191,194 +178,306 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         return promise.future();
     }
 
-    private void handleClientFrame(String clientId, WebSocketFrame frame) {
+    private void handleAgentFrame(AgentSession session, WebSocketFrame frame) {
         if (frame.isClose()) {
-            activeClient = null;
+            closeWebSocket(session.webSocket);
             return;
         }
-
         if (frame.isPing()) {
-            LOGGER.debug("Received PING from client {}", clientId);
-            if (activeClient != null) {
-                activeClient.writePong(Buffer.buffer("pong"));
-            }
+            session.lastSeenAt = Instant.now();
+            runtimeRegistry.touchAgent(tunnel, session.sessionId);
+            session.webSocket.writePong(Buffer.buffer("pong"));
             return;
         }
-
         if (frame.type().equals(WebSocketFrameType.PONG)) {
-            LOGGER.debug("Received PONG from client {}", clientId);
+            session.lastSeenAt = Instant.now();
+            runtimeRegistry.touchAgent(tunnel, session.sessionId);
+            return;
+        }
+        if (!frame.isBinary()) {
             return;
         }
 
-        if (!frame.isBinary()) return;
+        Buffer data = frame.binaryData();
+        if (data.length() < MessageUtil.CONTROL_WIDTH) {
+            LOGGER.error("Invalid frame length from agent session {}: {}", session.sessionId, data.length());
+            return;
+        }
 
         try {
-            Buffer data = frame.binaryData();
-
-            // 检查最小长度（至少包含操作码+UUID长度）
-            if (data.length() < OPERATION_WIDTH) {
-                LOGGER.error("Invalid frame length from client {}: {}", clientId, data.length());
+            OperationType operationType = MessageUtil.getOperationType(data);
+            if (!session.authenticated) {
+                if (operationType == OperationType.AUTH) {
+                    handleAuth(session, data);
+                } else {
+                    LOGGER.warn("Ignoring unauthenticated {} frame from session {}", operationType, session.sessionId);
+                }
                 return;
             }
 
-            OperationType operationType = MessageUtil.getOperationType(data);
+            if (MessageUtil.isControlOperation(operationType)) {
+                LOGGER.warn("Unexpected control frame {} from authenticated session {}", operationType, session.sessionId);
+                return;
+            }
+            if (data.length() < OPERATION_WIDTH) {
+                LOGGER.error("Invalid transfer frame length from agent session {}: {}", session.sessionId, data.length());
+                return;
+            }
+
             String requestId = MessageUtil.getRequestId(data);
             Buffer payload = MessageUtil.getPayload(data);
-
             RequestContext context = pendingRequests.get(requestId);
-            if (context == null || context.isClosed()) {
-                LOGGER.warn("Request context not found or closed: {}", requestId);
+            if (context == null || context.closed || !context.sessionId.equals(session.sessionId) || !session.active) {
+                LOGGER.warn("Request context not found, closed, or stale: {}", requestId);
                 return;
             }
 
             switch (operationType) {
                 case DATA:
-                    if (payload != null) {
-                        context.getSocket().write(payload);
-                        LOGGER.debug("Forwarded {} bytes to user for request {}", payload.length(), requestId);
-                    }
+                    context.socket.write(payload);
+                    LOGGER.debug("Forwarded {} bytes to user for request {}", payload.length(), requestId);
                     break;
-
                 case CLOSE:
-                    RequestContext ctx = pendingRequests.remove(requestId);
-                    if (ctx != null) {
-                        vertx.cancelTimer(ctx.getTimeoutId());
-                        ctx.getSocket().close();
+                    RequestContext removed = cleanupRequest(requestId, false);
+                    if (removed != null) {
+                        removed.socket.close();
                         LOGGER.debug("Closed user connection: {}", requestId);
                     }
                     break;
-
                 default:
-                    LOGGER.warn("Unknown op code {} from client {}", operationType, clientId);
+                    LOGGER.warn("Unknown op code {} from agent session {}", operationType, session.sessionId);
             }
         } catch (Exception ex) {
-            LOGGER.error("Error processing client frame", ex);
+            LOGGER.error("Error processing agent frame", ex);
         }
+    }
+
+    private void handleAuth(AgentSession session, Buffer data) {
+        JsonObject authPayload;
+        try {
+            authPayload = MessageUtil.getControlPayload(data);
+        } catch (Exception ex) {
+            rejectAuth(session);
+            return;
+        }
+        String token = authPayload.getString("token");
+        String agentName = authPayload.getString("agentName");
+        int version = authPayload.getInteger("version", -1);
+
+        if (version != PROTOCOL_VERSION || agentName == null || agentName.isBlank() || !tunnel.token().equals(token)) {
+            rejectAuth(session);
+            return;
+        }
+
+        vertx.cancelTimer(session.authTimerId);
+        session.agentName = agentName;
+        session.authenticated = true;
+        session.active = true;
+        session.connectedAt = Instant.now();
+        session.lastSeenAt = session.connectedAt;
+
+        AgentSession oldSession = activeSession;
+        if (oldSession != null && oldSession != session) {
+            replaceOldSession(oldSession, session);
+        }
+
+        activeSession = session;
+        runtimeRegistry.markAgentOnline(tunnel, agentName, session.sessionId);
+        session.webSocket.writeBinaryMessage(MessageUtil.buildControlMessage(
+                OperationType.AUTH_OK,
+                new JsonObject()
+                        .put("version", PROTOCOL_VERSION)
+                        .put("sessionId", session.sessionId)
+                        .put("message", "ok")
+        ));
+        LOGGER.info("FRP Agent authenticated for tunnel {}: agentName={}, sessionId={}",
+                tunnel.name(), agentName, session.sessionId);
+    }
+
+    private void rejectAuth(AgentSession session) {
+        LOGGER.warn("FRP Agent auth failed for tunnel {} session {}", tunnel.name(), session.sessionId);
+        session.webSocket.writeBinaryMessage(MessageUtil.buildControlMessage(
+                OperationType.AUTH_FAIL,
+                new JsonObject().put("version", PROTOCOL_VERSION).put("message", "auth failed")
+        )).onComplete(v -> closeWebSocket(session.webSocket));
+    }
+
+    private void replaceOldSession(AgentSession oldSession, AgentSession newSession) {
+        LOGGER.warn("Replacing tunnel {} agent session old={}, new={}",
+                tunnel.name(), oldSession.sessionId, newSession.sessionId);
+        oldSession.active = false;
+        closeRequestsForSession(oldSession.sessionId);
+        closeWebSocket(oldSession.webSocket);
     }
 
     private void handleUserData(String requestId, Buffer data) {
-        // 1. 查找对应的请求上下文
         RequestContext context = pendingRequests.get(requestId);
-        if (context == null || context.isClosed()) {
+        if (context == null || context.closed) {
             return;
         }
-
-        if (!checkClientAlive(requestId)) {
+        AgentSession session = authenticatedSession(context.sessionId);
+        if (session == null) {
+            cleanupRequest(requestId, false);
+            context.socket.close();
+            LOGGER.error("No active agent while forwarding data for {}", requestId);
             return;
         }
 
         try {
-            activeClient.writeBinaryMessage(MessageUtil.buildDataMessage(requestId, data));
-            LOGGER.debug("Forwarded {} bytes to client {} for request {}",
-                    data.length(), activeClient.hashCode(), requestId);
+            session.webSocket.writeBinaryMessage(MessageUtil.buildDataMessage(requestId, data));
+            LOGGER.debug("Forwarded {} bytes to agent {} for request {}",
+                    data.length(), session.sessionId, requestId);
         } catch (Exception ex) {
-            LOGGER.error("Failed to forward data to client {}", activeClient.hashCode(), ex);
+            LOGGER.error("Failed to forward data to agent {}", session.sessionId, ex);
         }
-
     }
 
-    private boolean forwardRequestToClient(String requestId, NetSocket userSocket) {
-        if (!checkClientAlive(requestId)) {
+    private boolean forwardRequestToAgent(RequestContext context) {
+        AgentSession session = authenticatedSession(context.sessionId);
+        if (session == null) {
             return false;
         }
-
         try {
-            activeClient.writeBinaryMessage(MessageUtil.buildOperationMessage(requestId, OperationType.CONNECT));
+            session.webSocket.writeBinaryMessage(MessageUtil.buildOperationMessage(context.requestId, OperationType.CONNECT));
             return true;
         } catch (Exception ex) {
-            LOGGER.error("Failed to notify client about new request", ex);
+            LOGGER.error("Failed to notify agent about new request", ex);
             return false;
         }
     }
 
-    private void sendCloseSignalToClient(String requestId) {
-
-        if (checkClientAlive(requestId)) {
-            try {
-                activeClient.writeBinaryMessage(MessageUtil.buildOperationMessage(requestId, OperationType.CLOSE));
-                LOGGER.debug("Sent CLOSE signal to client {} for request {}", activeClient.hashCode(), requestId);
-            } catch (Exception ex) {
-                LOGGER.error("Failed to send close signal to client {}", activeClient.hashCode(), ex);
-            }
+    private void sendCloseSignalToAgent(RequestContext context) {
+        AgentSession session = authenticatedSession(context.sessionId);
+        if (session == null) {
+            return;
         }
-
+        try {
+            session.webSocket.writeBinaryMessage(MessageUtil.buildOperationMessage(context.requestId, OperationType.CLOSE));
+            LOGGER.debug("Sent CLOSE signal to agent {} for request {}", session.sessionId, context.requestId);
+        } catch (Exception ex) {
+            LOGGER.error("Failed to send close signal to agent {}", session.sessionId, ex);
+        }
     }
 
-    private boolean checkClientAlive(String requestId) {
-        if (activeClient == null) {
-            RequestContext ctx = pendingRequests.remove(requestId);
-            if (ctx != null) {
-                vertx.cancelTimer(ctx.getTimeoutId());
-                ctx.getSocket().close();
-                LOGGER.error("No active clients while forwarding data for {}", requestId);
-            }
-            return false;
+    private RequestContext cleanupRequest(String requestId, boolean notifyAgent) {
+        RequestContext context = pendingRequests.remove(requestId);
+        if (context == null) {
+            return null;
         }
-        return !activeClient.isClosed();
+        vertx.cancelTimer(context.timeoutId);
+        if (notifyAgent) {
+            sendCloseSignalToAgent(context);
+        }
+        updateActiveConnections(context.sessionId);
+        return context;
     }
 
-    private void setupHeartbeat(ServerWebSocket webSocket, String clientId) {
-        // 1. 设置心跳发送定时器
-        long timerId = vertx.setPeriodic(HEARTBEAT_INTERVAL, id -> {
-            if (webSocket.isClosed()) {
+    private void closeRequestsForSession(String sessionId) {
+        pendingRequests.entrySet().removeIf(entry -> {
+            RequestContext context = entry.getValue();
+            if (!context.sessionId.equals(sessionId)) {
+                return false;
+            }
+            vertx.cancelTimer(context.timeoutId);
+            context.closed = true;
+            context.socket.close();
+            return true;
+        });
+        updateActiveConnections(sessionId);
+    }
+
+    private AgentSession authenticatedSession() {
+        AgentSession session = activeSession;
+        if (session == null || !session.authenticated || !session.active || session.webSocket.isClosed()) {
+            return null;
+        }
+        return session;
+    }
+
+    private AgentSession authenticatedSession(String sessionId) {
+        AgentSession session = authenticatedSession();
+        if (session == null || !session.sessionId.equals(sessionId)) {
+            return null;
+        }
+        return session;
+    }
+
+    private long setupHeartbeat(AgentSession session) {
+        return vertx.setPeriodic(HEARTBEAT_INTERVAL, id -> {
+            if (session.webSocket.isClosed()) {
                 vertx.cancelTimer(id);
                 return;
             }
-
             try {
-                // 发送PING帧
-                webSocket.writePing(Buffer.buffer("ping-" + System.currentTimeMillis()));
-                LOGGER.trace("Sent PING to client {}", clientId);
+                session.webSocket.writePing(Buffer.buffer("ping-" + System.currentTimeMillis()));
+                LOGGER.trace("Sent PING to agent session {}", session.sessionId);
             } catch (Exception ex) {
-                LOGGER.error("Heartbeat failed for client {}", clientId, ex);
-                vertx.cancelTimer(id);
-
-                // 清理资源
-                activeClient = null;
-                try {
-                    webSocket.close();
-                } catch (Exception ignore) {
-                }
+                LOGGER.error("Heartbeat failed for agent session {}", session.sessionId, ex);
+                closeWebSocket(session.webSocket);
             }
         });
-
-        // 2. 连接关闭时取消心跳
-        webSocket.closeHandler(v -> vertx.cancelTimer(timerId));
     }
 
-    // 请求上下文类，用于跟踪连接状态
+    private void handleSessionClosed(AgentSession session) {
+        vertx.cancelTimer(session.authTimerId);
+        vertx.cancelTimer(session.heartbeatTimerId);
+        session.active = false;
+        if (activeSession == session) {
+            activeSession = null;
+            closeRequestsForSession(session.sessionId);
+            runtimeRegistry.markAgentOffline(tunnel, session.sessionId);
+        }
+        LOGGER.warn("FRP Agent disconnected: {}", session.sessionId);
+    }
+
+    private void updateActiveConnections(String sessionId) {
+        AgentSession session = activeSession;
+        if (session == null || !session.sessionId.equals(sessionId)) {
+            return;
+        }
+        int count = (int) pendingRequests.values().stream()
+                .filter(context -> context.sessionId.equals(sessionId))
+                .count();
+        runtimeRegistry.updateActiveConnections(tunnel, sessionId, count);
+    }
+
+    private void closeWebSocket(ServerWebSocket webSocket) {
+        try {
+            if (!webSocket.isClosed()) {
+                webSocket.close();
+            }
+        } catch (Exception ignore) {
+        }
+    }
+
+    private static class AgentSession {
+        private final String sessionId;
+        private final ServerWebSocket webSocket;
+        private String agentName;
+        private boolean authenticated;
+        private boolean active;
+        private Instant connectedAt;
+        private Instant lastSeenAt;
+        private long authTimerId;
+        private long heartbeatTimerId;
+
+        AgentSession(String sessionId, ServerWebSocket webSocket) {
+            this.sessionId = sessionId;
+            this.webSocket = webSocket;
+        }
+    }
+
     private static class RequestContext {
         private final String requestId;
+        private final String sessionId;
         private final NetSocket socket;
         private long timeoutId;
-        private boolean closed = false;
+        private boolean closed;
 
-        public RequestContext(String requestId, NetSocket socket) {
+        RequestContext(String requestId, String sessionId, NetSocket socket) {
             this.requestId = requestId;
+            this.sessionId = sessionId;
             this.socket = socket;
-
-            // 监听关闭事件
-            socket.closeHandler(v -> closed = true);
-        }
-
-        public String getRequestId() {
-            return requestId;
-        }
-
-        public NetSocket getSocket() {
-            return socket;
-        }
-
-        public long getTimeoutId() {
-            return timeoutId;
-        }
-
-        public void setTimeoutId(long timeoutId) {
-            this.timeoutId = timeoutId;
-        }
-
-        public boolean isClosed() {
-            return closed;
         }
     }
 }

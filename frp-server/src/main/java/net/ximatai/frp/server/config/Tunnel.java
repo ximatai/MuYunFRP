@@ -27,15 +27,24 @@ public interface Tunnel {
      */
     int agentPort();
 
+    String token();
+
     default TunnelRecord toRecord() {
-        return new TunnelRecord(name(), type(), openPort(), agentPort());
+        return new TunnelRecord(name(), type(), openPort(), agentPort(), true);
     }
 
     static Tunnel createRecord(String name, ProxyType type, int openPort, int agentPort) {
-        return new TunnelRecord(name, type, openPort, agentPort);
+        return createRecord(name, type, openPort, agentPort, "test-token");
     }
 
-    record TunnelRecord(String name, ProxyType type, int openPort, int agentPort) implements Tunnel {
+    static Tunnel createRecord(String name, ProxyType type, int openPort, int agentPort, String token) {
+        return new TunnelConfig(name, type, openPort, agentPort, token);
+    }
+
+    record TunnelConfig(String name, ProxyType type, int openPort, int agentPort, String token) implements Tunnel {
+    }
+
+    record TunnelRecord(String name, ProxyType type, int openPort, int agentPort, boolean tokenConfigured) {
     }
 
 }

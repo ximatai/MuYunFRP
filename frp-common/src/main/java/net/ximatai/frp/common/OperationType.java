@@ -3,7 +3,10 @@ package net.ximatai.frp.common;
 public enum OperationType {
     CONNECT((byte) 0x01),
     DATA((byte) 0x02),
-    CLOSE((byte) 0x03);
+    CLOSE((byte) 0x03),
+    AUTH((byte) 0x10),
+    AUTH_OK((byte) 0x11),
+    AUTH_FAIL((byte) 0x12);
 
     private final byte value;
 

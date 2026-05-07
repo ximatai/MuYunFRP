@@ -21,13 +21,17 @@ public class TunnelService {
     @Inject
     FrpServerConfig frpServerConfig;
 
+    @Inject
+    TunnelRuntimeRegistry runtimeRegistry;
+
     @PostConstruct
     void init() {
 
         LOGGER.info("Need Link Tunnel Size is {}", frpServerConfig.tunnels().size());
 
         frpServerConfig.tunnels().forEach(tunnel -> {
-            TunnelLinkerVerticle linker = new TunnelLinkerVerticle(vertx, tunnel);
+            runtimeRegistry.registerTunnel(tunnel);
+            TunnelLinkerVerticle linker = new TunnelLinkerVerticle(vertx, tunnel, runtimeRegistry);
             vertx.deployVerticle(linker);
         });
     }

@@ -31,11 +31,13 @@
 frp-server:
   management:
     port: 8089
+    token: ${FRP_SERVER_MANAGEMENT_TOKEN}
   tunnels:
     - name: 测试
       type: tcp
       open-port: 8082
       agent-port: 8083
+      token: ${FRP_SERVER_TUNNEL_TOKEN}
 
 quarkus:
   http:
@@ -64,9 +66,12 @@ java -jar muyun-frp-server-x.x.x-runner.jar
 ```yml
 frp-agent:
   type: tcp
+  agent-name: home-agent
   frp-tunnel:
     host: 127.0.0.1
     port: 8083
+  auth:
+    token: ${FRP_AGENT_TUNNEL_TOKEN}
   proxy:
     host: 192.168.6.203
     port: 22
@@ -96,6 +101,23 @@ java -jar muyun-frp-agent-x.x.x-runner.jar
     ```
 2. 如果想定制更负责的日志输出，可以参考`./frp-server/src/main/resources/application-demo.yml`文件内容。
 3. 如果遇到启动失败，请检查端口占用情况。典型的报错信息为：`java.net.BindException: Address already in use`
+
+### 管理接口
+
+`/api/tunnel` 使用 management token 保护：
+
+```shell
+curl -H "Authorization: Bearer $FRP_SERVER_MANAGEMENT_TOKEN" http://127.0.0.1:8089/api/tunnel
+```
+
+接口返回 tunnel 配置和运行态，但不会返回任何 token。
+
+### V1 行为说明
+
+1. `agent` 连接 tunnel 后必须先完成 `AUTH` 鉴权，鉴权成功前不会参与流量转发。
+2. 每个 tunnel V1 最多一个在线 `agent`，新 `agent` 使用正确 token 连接时会替换旧连接。
+3. 如果用户访问 `open-port` 时没有已鉴权 `agent` 在线，连接会立即关闭。
+4. HTTP 当前仍作为 TCP 透传使用，暂不支持 Host/SNI 路由。
 
 ### For Developer
 

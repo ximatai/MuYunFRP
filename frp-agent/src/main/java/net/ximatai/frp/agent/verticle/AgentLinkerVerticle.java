@@ -7,6 +7,7 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.WebSocket;
 import io.vertx.core.http.WebSocketClientOptions;
 import io.vertx.core.http.WebSocketFrame;
+import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.NetSocket;
 import net.ximatai.frp.agent.config.Agent;
 import net.ximatai.frp.agent.config.FrpTunnel;
@@ -28,9 +29,11 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     private static final long LIVE_CHECK_INTERVAL = 10000;      // 10秒保活检查
 
     private static final int MAX_WEBSOCKET_FRAME_SIZE = 65536; //  WebSocket帧最大长度，默认即为该值，主要不要超过服务端的设置
+    private static final int PROTOCOL_VERSION = 1;
 
     private final Agent agent;
     private WebSocket controlSocket;
+    private boolean authenticated;
 
     // 存储请求映射 (requestId -> NetSocket连接到目标服务)
     private final Map<String, NetSocket> pendingRequests = new HashMap<>();
@@ -68,6 +71,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             this.controlSocket.close();
         }
         this.controlSocket = controlSocket;
+        this.authenticated = false;
     }
 
     private Future<Void> connectToFrpTunnel() {
@@ -83,27 +87,56 @@ public class AgentLinkerVerticle extends AbstractVerticle {
                             .connect("/")
                             .onSuccess(ws -> {
                                 LOGGER.info("Successfully connected to FRP server");
+                                final boolean[] completed = {false};
+                                final long[] authTimerId = new long[1];
 
                                 // 保存控制通道socket
                                 setControlSocket(ws);
 
-                                // 设置帧处理器
-                                ws.frameHandler(this::handleServerFrame);
-
                                 // 设置关闭处理器
                                 ws.closeHandler(v -> {
                                     LOGGER.warn("Connection to FRP server closed");
+                                    if (!authenticated && !completed[0]) {
+                                        completed[0] = true;
+                                        vertx.cancelTimer(authTimerId[0]);
+                                        promise.fail("FRP connection closed before auth");
+                                    }
                                     handleConnectionLoss();
                                 });
 
                                 // 设置异常处理器
                                 ws.exceptionHandler(ex -> {
                                     LOGGER.error("WebSocket connection error", ex);
+                                    if (!authenticated && !completed[0]) {
+                                        completed[0] = true;
+                                        vertx.cancelTimer(authTimerId[0]);
+                                        promise.fail(ex);
+                                    }
                                     ws.close();
                                     handleConnectionLoss();
                                 });
 
-                                promise.complete();
+                                sendAuth(ws);
+                                authTimerId[0] = vertx.setTimer(5000, timerId -> {
+                                    if (!authenticated && !completed[0]) {
+                                        completed[0] = true;
+                                        promise.fail("FRP auth timeout");
+                                        ws.close();
+                                    }
+                                });
+                                ws.frameHandler(frame -> {
+                                    OperationType operationType = frameOperationType(frame);
+                                    handleServerFrame(frame);
+                                    if (authenticated && !completed[0]) {
+                                        completed[0] = true;
+                                        vertx.cancelTimer(authTimerId[0]);
+                                        promise.complete();
+                                    } else if (operationType == OperationType.AUTH_FAIL && !completed[0]) {
+                                        completed[0] = true;
+                                        vertx.cancelTimer(authTimerId[0]);
+                                        promise.fail("FRP auth failed");
+                                    }
+                                });
                                 lock.release();
                             })
                             .onFailure(t -> {
@@ -116,6 +149,21 @@ public class AgentLinkerVerticle extends AbstractVerticle {
         return promise.future();
     }
 
+    private OperationType frameOperationType(WebSocketFrame frame) {
+        if (!frame.isBinary()) {
+            return null;
+        }
+        Buffer data = frame.binaryData();
+        if (data.length() < MessageUtil.CONTROL_WIDTH) {
+            return null;
+        }
+        try {
+            return MessageUtil.getOperationType(data);
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
     private void handleServerFrame(WebSocketFrame frame) {
         try {
             // 只处理二进制帧
@@ -123,13 +171,27 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
             Buffer data = frame.binaryData();
 
-            // 检查最小长度（至少包含操作码+UUID长度）
-            if (data.length() < OPERATION_WIDTH) {
+            if (data.length() < MessageUtil.CONTROL_WIDTH) {
                 LOGGER.error("Invalid frame length from server: {}", data.length());
                 return;
             }
 
             OperationType operationType = MessageUtil.getOperationType(data);
+            if (!authenticated) {
+                handleAuthFrame(operationType, data);
+                return;
+            }
+
+            if (MessageUtil.isControlOperation(operationType)) {
+                handleAuthFrame(operationType, data);
+                return;
+            }
+
+            if (data.length() < OPERATION_WIDTH) {
+                LOGGER.error("Invalid transfer frame length from server: {}", data.length());
+                return;
+            }
+
             String requestId = MessageUtil.getRequestId(data);
             Buffer payload = MessageUtil.getPayload(data);
 
@@ -155,6 +217,29 @@ public class AgentLinkerVerticle extends AbstractVerticle {
         } catch (Exception ex) {
             LOGGER.error("Error processing server frame", ex);
         }
+    }
+
+    private void sendAuth(WebSocket ws) {
+        JsonObject payload = new JsonObject()
+                .put("version", PROTOCOL_VERSION)
+                .put("token", agent.auth().token())
+                .put("agentName", agent.agentName());
+        ws.writeBinaryMessage(MessageUtil.buildControlMessage(OperationType.AUTH, payload));
+    }
+
+    private void handleAuthFrame(OperationType operationType, Buffer data) {
+        if (operationType == OperationType.AUTH_OK) {
+            authenticated = true;
+            JsonObject payload = MessageUtil.getControlPayload(data);
+            LOGGER.info("FRP auth success, sessionId={}", payload.getString("sessionId"));
+            return;
+        }
+        if (operationType == OperationType.AUTH_FAIL) {
+            LOGGER.error("FRP auth failed");
+            handleConnectionLoss();
+            return;
+        }
+        LOGGER.warn("Ignoring {} before FRP auth success", operationType);
     }
 
     private void handleConnectRequest(String requestId) {
@@ -282,6 +367,11 @@ public class AgentLinkerVerticle extends AbstractVerticle {
     private void sendDataToServer(String requestId, Buffer data) {
         if (controlSocket == null || controlSocket.isClosed()) {
             LOGGER.warn("Control channel not available, cannot send data for request: {}", requestId);
+            closeRequestConnection(requestId);
+            return;
+        }
+        if (!authenticated) {
+            LOGGER.warn("Control channel not authenticated, cannot send data for request: {}", requestId);
             closeRequestConnection(requestId);
             return;
         }
