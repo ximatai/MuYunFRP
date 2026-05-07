@@ -16,10 +16,10 @@ quarkus:
 
     level: INFO
     console:
-      enable: true
+      enabled: true
       format: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{3.}] (%t) Line:%L - %s%e%n"
     file:
-      enable: true
+      enabled: true
       path: logs/frp-server.log
       level: DEBUG
       format: "%d{yyyy-MM-dd HH:mm:ss} %-5p [%c{3.}] (%t) Line:%L - %s%e%n"

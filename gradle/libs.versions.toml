@@ -1,11 +1,12 @@
 [versions]
-quarkus = "3.23.2"
-jackson = "2.19.0"
-verx = "4.5.15"
+quarkus = "3.35.2"
+jackson = "2.21.3"
+vertx = "4.5.27"
 
 
 [libraries]
-vertx-core = { module = "io.vertx:vertx-core", version.ref = "verx" }
+vertx-core = { module = "io.vertx:vertx-core", version.ref = "vertx" }
+vertx-junit5 = { module = "io.vertx:vertx-junit5", version.ref = "vertx" }
 quarkus-platform-bom = { module = "io.quarkus.platform:quarkus-bom", version.ref = "quarkus" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 

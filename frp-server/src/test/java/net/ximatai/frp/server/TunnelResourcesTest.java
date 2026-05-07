@@ -31,7 +31,16 @@ import static org.hamcrest.Matchers.not;
 @QuarkusTest
 @TestProfile(TunnelResourcesTest.Profile.class)
 class TunnelResourcesTest {
-    private static final String STORE_PATH = "build/test-tunnels/tunnel-resources-test-" + System.nanoTime() + ".json";
+    private static final Path STORE_FILE = Path.of("build", "test-tunnels", "tunnel-resources-test.json").toAbsolutePath();
+    private static final String STORE_PATH = STORE_FILE.toString();
+
+    static {
+        try {
+            Files.deleteIfExists(STORE_FILE);
+        } catch (Exception ex) {
+            throw new ExceptionInInitializerError(ex);
+        }
+    }
 
     @Inject
     Vertx vertx;
@@ -82,7 +91,7 @@ class TunnelResourcesTest {
                 .extract()
                 .path("agentToken");
 
-        Assertions.assertFalse(Files.readString(Path.of(STORE_PATH)).contains(agentToken));
+        Assertions.assertFalse(Files.readString(STORE_FILE).contains(agentToken));
 
         given()
                 .auth().preemptive().basic("admin", "password")
@@ -124,7 +133,7 @@ class TunnelResourcesTest {
         Assertions.assertNotEquals(oldToken, newToken);
         Assertions.assertEquals(OperationType.AUTH_FAIL, authenticateAgent(agentPort, oldToken, "old-agent"));
         Assertions.assertEquals(OperationType.AUTH_OK, authenticateAgent(agentPort, newToken, "new-agent"));
-        Assertions.assertFalse(Files.readString(Path.of(STORE_PATH)).contains(newToken));
+        Assertions.assertFalse(Files.readString(STORE_FILE).contains(newToken));
     }
 
     @Test

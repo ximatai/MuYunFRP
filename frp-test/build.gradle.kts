@@ -9,7 +9,7 @@ dependencies {
     testImplementation(project(":frp-server"))
     testImplementation(project(":frp-agent"))
 
-    testImplementation("io.vertx:vertx-junit5:4.5.14")
+    testImplementation(libs.vertx.junit5)
 
     testImplementation("io.quarkus:quarkus-config-yaml")
     testImplementation("io.quarkus:quarkus-arc")
