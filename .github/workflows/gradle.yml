@@ -1,5 +1,8 @@
 name: Java CI with Gradle
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [ "master" ]
