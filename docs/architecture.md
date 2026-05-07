@@ -2,8 +2,10 @@
 
 ## 核心对象
 
-- `FRP Server`：运行在公网，按配置启动 tunnel。
-- `Tunnel`：一组端口配置，包含用户访问的 `open-port`、Agent 连接的 `agent-port` 和 token。
+- `FRP Server`：运行在公网，启动时从本地 tunnel store 加载 tunnel，并通过管理 API 动态维护 tunnel。
+- `Tunnel`：一组端口配置，包含用户访问的 `open-port`、Agent 连接的 `agent-port` 和 token hash。
+- `TunnelStore`：本地 JSON tunnel 持久化文件，store 中只保存 token hash。
+- `TunnelManager`：运行态 tunnel 管理器，负责加载 store、deploy/undeploy listener、创建、删除、重启和 reset token。
 - `FRP Agent`：运行在内网，连接 server 的 `agent-port`，并转发到真实上游服务。
 - `AgentSession`：server 端已连接 agent 的会话状态。V1 每个 tunnel 最多一个已鉴权 session。
 - `RequestContext`：server 端用户连接上下文，使用 requestId 绑定用户 socket 和 agent session。
@@ -29,4 +31,4 @@ User -> Server open-port -> RequestContext
 
 ## 管理状态
 
-`/api/tunnel` 合并静态配置和运行态，返回 agent 在线状态、agentName、sessionId、activeConnections、connectedAt、lastSeenAt。接口不返回 token。
+`/api/tunnels` 合并持久化配置和运行态，返回 lifecycle、agent 在线状态、agentName、sessionId、activeConnections、connectedAt、lastSeenAt。接口不返回 tokenHash。

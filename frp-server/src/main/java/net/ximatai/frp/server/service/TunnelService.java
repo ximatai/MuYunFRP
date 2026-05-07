@@ -16,24 +16,12 @@ public class TunnelService {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
     @Inject
-    Vertx vertx;
-
-    @Inject
-    FrpServerConfig frpServerConfig;
-
-    @Inject
-    TunnelRuntimeRegistry runtimeRegistry;
+    TunnelManager tunnelManager;
 
     @PostConstruct
     void init() {
-
-        LOGGER.info("Need Link Tunnel Size is {}", frpServerConfig.tunnels().size());
-
-        frpServerConfig.tunnels().forEach(tunnel -> {
-            runtimeRegistry.registerTunnel(tunnel);
-            TunnelLinkerVerticle linker = new TunnelLinkerVerticle(vertx, tunnel, runtimeRegistry);
-            vertx.deployVerticle(linker);
-        });
+        LOGGER.info("Starting runtime tunnels");
+        tunnelManager.startAll();
     }
 
 }

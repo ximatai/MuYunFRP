@@ -6,8 +6,15 @@
 - Agent `AUTH / AUTH_OK / AUTH_FAIL` 握手。
 - 每 tunnel 单 active agent session，后连踢前连。
 - 管理 API HTTP Basic Auth 鉴权。
-- `/api/tunnel` 返回配置和运行态。
+- `/api/tunnels` 返回配置和运行态。
 - TCP/HTTP 透传成功路径和关键鉴权场景测试。
+
+## V1.1: Runtime Tunnel Management
+
+- tunnel 来源迁移到本地 JSON store。
+- 管理 API 支持 list/get/create/delete/restart/reset-token。
+- store 只保存 PBKDF2 token hash，明文 agent token 只在 create/reset 响应返回一次。
+- tunnel runtime 增加 STARTING/LISTENING/FAILED/STOPPING/STOPPED 生命周期。
 
 ## V2: HTTP/HTTPS 入口能力
 

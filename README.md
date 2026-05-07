@@ -10,8 +10,8 @@
 ### 名词解释：
 
 * `FRP-Server`，服务端，负责接收客户端的请求，并对数据进行转发，通常运行在公网上。
-* `Tunnel`，服务端所拉起的一个通道，该通道包含两个端口，`open-port`是服务代理后可供用户直接访问的端口，`agetn-port`是供
-  `agent`端链接的端口。 一个`FRP-Server`可以配置多个`Tunnel`。
+* `Tunnel`，服务端所拉起的一个通道，该通道包含两个端口，`open-port`是服务代理后可供用户直接访问的端口，`agent-port`是供
+  `agent`端链接的端口。 一个`FRP-Server`可以通过管理 API 创建多个`Tunnel`。
 * `FRP-Agent`，代理客户端，通常运行在私网内，用来扮演请求真实服务即`Upstream Server`和数据转发的角色。所以要在其中配置
   `frp-tunnel`信息以及真实上游服务的`proxy`信息。
 
@@ -33,12 +33,8 @@ frp-server:
     port: 8089
     username: ${FRP_SERVER_MANAGEMENT_USERNAME}
     password: ${FRP_SERVER_MANAGEMENT_PASSWORD}
-  tunnels:
-    - name: 测试
-      type: tcp
-      open-port: 8082
-      agent-port: 8083
-      token: ${FRP_SERVER_TUNNEL_TOKEN}
+  tunnel-store:
+    path: ./config/tunnels.json
 
 quarkus:
   http:
@@ -100,18 +96,40 @@ java -jar muyun-frp-agent-x.x.x-runner.jar
     ```shell
     nohup java -jar muyun-frp-agent-x.x.x-runner.jar > /dev/null 2>&1 & 
     ```
-2. 如果想定制更负责的日志输出，可以参考`./frp-server/src/main/resources/application-demo.yml`文件内容。
+2. 如果想定制更复杂的日志输出，可以参考`./frp-server/src/main/resources/application-demo.yml`文件内容。
 3. 如果遇到启动失败，请检查端口占用情况。典型的报错信息为：`java.net.BindException: Address already in use`
 
 ### 管理接口
 
-`/api/tunnel` 使用 HTTP Basic Auth 保护，浏览器访问时会弹出用户名密码输入框：
+`/api/tunnels` 使用 HTTP Basic Auth 保护，浏览器访问时会弹出用户名密码输入框：
 
 ```shell
-curl -u "$FRP_SERVER_MANAGEMENT_USERNAME:$FRP_SERVER_MANAGEMENT_PASSWORD" http://127.0.0.1:8089/api/tunnel
+curl -u "$FRP_SERVER_MANAGEMENT_USERNAME:$FRP_SERVER_MANAGEMENT_PASSWORD" http://127.0.0.1:8089/api/tunnels
 ```
 
 接口返回 tunnel 配置和运行态，但不会返回任何 token 或管理端密码。Basic Auth 本身不加密用户名密码，公网使用时应配合 HTTPS 或反向代理 TLS。
+
+创建 tunnel：
+
+```shell
+curl -u "$FRP_SERVER_MANAGEMENT_USERNAME:$FRP_SERVER_MANAGEMENT_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"ssh_home","type":"tcp","openPort":8082,"agentPort":8083}' \
+  http://127.0.0.1:8089/api/tunnels
+```
+
+响应中的 `agentToken` 只返回一次。Server 仅在 `tunnels.json` 中保存 token hash。
+
+从旧版 `frp-server.tunnels` 迁移时，不做自动迁移。可以启动新版服务后通过 `POST /api/tunnels` 重新创建 tunnel，并把响应里的 `agentToken` 配置到 agent：
+
+```json
+{
+  "name": "ssh_home",
+  "type": "tcp",
+  "openPort": 8082,
+  "agentPort": 8083
+}
+```
 
 ### V1 行为说明
 

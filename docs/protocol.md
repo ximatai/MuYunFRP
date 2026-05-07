@@ -28,6 +28,8 @@ V1 控制操作：
 }
 ```
 
+Server 使用 tunnel store 中的 PBKDF2 token hash 校验 `token`，不持久化明文 token。
+
 `AUTH_OK` payload：
 
 ```json

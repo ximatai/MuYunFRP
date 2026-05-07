@@ -11,6 +11,7 @@ import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.http.WebSocketFrame;
 import io.vertx.core.http.WebSocketFrameType;
 import io.vertx.core.json.JsonObject;
+import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetSocket;
 import net.ximatai.frp.common.MessageUtil;
 import net.ximatai.frp.common.OperationType;
@@ -19,6 +20,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -39,6 +42,10 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
     private final TunnelRuntimeRegistry runtimeRegistry;
 
     private volatile AgentSession activeSession;
+    private HttpServer agentServer;
+    private NetServer publicServer;
+    private volatile boolean stopping;
+    private final Map<String, AgentSession> agentSessions = new ConcurrentHashMap<>();
     private final Map<String, RequestContext> pendingRequests = new ConcurrentHashMap<>();
 
     public TunnelLinkerVerticle(Vertx vertx, Tunnel tunnel) {
@@ -65,7 +72,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 })
                 .onFailure(throwable -> {
                     LOGGER.error("Link {} Failed", tunnel.name(), throwable);
-                    startPromise.fail(throwable);
+                    stopOpenedServers().onComplete(v -> startPromise.fail(throwable));
                 });
     }
 
@@ -78,6 +85,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         HttpServer server = vertx.createHttpServer(options);
         server.webSocketHandler(webSocket -> {
                     AgentSession session = new AgentSession(UUID.randomUUID().toString(), webSocket);
+                    agentSessions.put(session.sessionId, session);
                     LOGGER.info("FRP Agent connected before auth: {} @ {}", session.sessionId, webSocket.remoteAddress());
 
                     session.authTimerId = vertx.setTimer(AUTH_TIMEOUT, id -> {
@@ -99,6 +107,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 .exceptionHandler(err -> LOGGER.error("Server error", err))
                 .listen(port)
                 .onSuccess(s -> {
+                    agentServer = s;
                     LOGGER.info("Agent server listening on port {}", port);
                     promise.complete();
                 })
@@ -167,6 +176,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
                 })
                 .listen(port)
                 .onSuccess(server -> {
+                    publicServer = server;
                     LOGGER.info("Public server listening on port {}", port);
                     promise.complete();
                 })
@@ -264,11 +274,26 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         String agentName = authPayload.getString("agentName");
         int version = authPayload.getInteger("version", -1);
 
-        if (version != PROTOCOL_VERSION || agentName == null || agentName.isBlank() || !tunnel.token().equals(token)) {
+        if (version != PROTOCOL_VERSION || agentName == null || agentName.isBlank()) {
             rejectAuth(session);
             return;
         }
 
+        vertx.executeBlocking(() -> tunnel.verifyToken(token), false)
+                .onSuccess(verified -> {
+                    if (session.webSocket.isClosed() || session.authenticated) {
+                        return;
+                    }
+                    if (!verified) {
+                        rejectAuth(session);
+                        return;
+                    }
+                    acceptAuth(session, agentName);
+                })
+                .onFailure(ex -> rejectAuth(session));
+    }
+
+    private void acceptAuth(AgentSession session, String agentName) {
         vertx.cancelTimer(session.authTimerId);
         session.agentName = agentName;
         session.authenticated = true;
@@ -422,6 +447,7 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
         vertx.cancelTimer(session.authTimerId);
         vertx.cancelTimer(session.heartbeatTimerId);
         session.active = false;
+        agentSessions.remove(session.sessionId);
         if (activeSession == session) {
             activeSession = null;
             closeRequestsForSession(session.sessionId);
@@ -448,6 +474,59 @@ public class TunnelLinkerVerticle extends AbstractVerticle {
             }
         } catch (Exception ignore) {
         }
+    }
+
+    @Override
+    public void stop(Promise<Void> stopPromise) {
+        stopping = true;
+        AgentSession session = activeSession;
+        activeSession = null;
+        if (session != null) {
+            runtimeRegistry.markAgentOffline(tunnel, session.sessionId);
+        }
+        for (AgentSession agentSession : new ArrayList<>(agentSessions.values())) {
+            agentSession.active = false;
+            closeWebSocket(agentSession.webSocket);
+        }
+        agentSessions.clear();
+        for (RequestContext context : new ArrayList<>(pendingRequests.values())) {
+            vertx.cancelTimer(context.timeoutId);
+            context.closed = true;
+            context.socket.close();
+        }
+        pendingRequests.clear();
+        updateActiveConnectionsAfterStop();
+
+        stopOpenedServers().onComplete(ar -> {
+            if (ar.succeeded()) {
+                stopPromise.complete();
+            } else {
+                stopPromise.fail(ar.cause());
+            }
+        });
+    }
+
+    private void updateActiveConnectionsAfterStop() {
+        try {
+            runtimeRegistry.markStatus(tunnel, TunnelStatus.STOPPED);
+        } catch (Exception ignore) {
+        }
+    }
+
+    private Future<Void> stopOpenedServers() {
+        List<Future<Void>> futures = new ArrayList<>();
+        if (publicServer != null) {
+            futures.add(publicServer.close());
+            publicServer = null;
+        }
+        if (agentServer != null) {
+            futures.add(agentServer.close());
+            agentServer = null;
+        }
+        if (futures.isEmpty()) {
+            return Future.succeededFuture();
+        }
+        return Future.all(futures).mapEmpty();
     }
 
     private static class AgentSession {

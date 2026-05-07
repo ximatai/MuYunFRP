@@ -3,12 +3,8 @@ frp-server:
     port: 8089
     username: ${FRP_SERVER_MANAGEMENT_USERNAME}
     password: ${FRP_SERVER_MANAGEMENT_PASSWORD}
-  tunnels:
-    - name: 测试
-      type: tcp
-      open-port: 8082
-      agent-port: 8083
-      token: ${FRP_SERVER_TUNNEL_TOKEN}
+  tunnel-store:
+    path: ./config/tunnels.json
 
 quarkus:
   http:

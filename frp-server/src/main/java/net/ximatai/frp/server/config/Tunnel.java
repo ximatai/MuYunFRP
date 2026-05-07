@@ -27,7 +27,15 @@ public interface Tunnel {
      */
     int agentPort();
 
-    String token();
+    TokenHash tokenHash();
+
+    String createdAt();
+
+    String updatedAt();
+
+    default boolean verifyToken(String token) {
+        return tokenHash().verify(token);
+    }
 
     default TunnelRecord toRecord() {
         return new TunnelRecord(name(), type(), openPort(), agentPort(), true);
@@ -38,10 +46,19 @@ public interface Tunnel {
     }
 
     static Tunnel createRecord(String name, ProxyType type, int openPort, int agentPort, String token) {
-        return new TunnelConfig(name, type, openPort, agentPort, token);
+        String now = java.time.Instant.now().toString();
+        return new TunnelConfig(name, type, openPort, agentPort, TokenHash.create(token), now, now);
     }
 
-    record TunnelConfig(String name, ProxyType type, int openPort, int agentPort, String token) implements Tunnel {
+    record TunnelConfig(
+            String name,
+            ProxyType type,
+            int openPort,
+            int agentPort,
+            TokenHash tokenHash,
+            String createdAt,
+            String updatedAt
+    ) implements Tunnel {
     }
 
     record TunnelRecord(String name, ProxyType type, int openPort, int agentPort, boolean tokenConfigured) {
