@@ -1,7 +1,8 @@
 frp-server:
   management:
     port: 8089
-    token: ${FRP_SERVER_MANAGEMENT_TOKEN}
+    username: ${FRP_SERVER_MANAGEMENT_USERNAME}
+    password: ${FRP_SERVER_MANAGEMENT_PASSWORD}
   tunnels:
     - name: 测试
       type: tcp

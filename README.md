@@ -31,7 +31,8 @@
 frp-server:
   management:
     port: 8089
-    token: ${FRP_SERVER_MANAGEMENT_TOKEN}
+    username: ${FRP_SERVER_MANAGEMENT_USERNAME}
+    password: ${FRP_SERVER_MANAGEMENT_PASSWORD}
   tunnels:
     - name: 测试
       type: tcp
@@ -104,13 +105,13 @@ java -jar muyun-frp-agent-x.x.x-runner.jar
 
 ### 管理接口
 
-`/api/tunnel` 使用 management token 保护：
+`/api/tunnel` 使用 HTTP Basic Auth 保护，浏览器访问时会弹出用户名密码输入框：
 
 ```shell
-curl -H "Authorization: Bearer $FRP_SERVER_MANAGEMENT_TOKEN" http://127.0.0.1:8089/api/tunnel
+curl -u "$FRP_SERVER_MANAGEMENT_USERNAME:$FRP_SERVER_MANAGEMENT_PASSWORD" http://127.0.0.1:8089/api/tunnel
 ```
 
-接口返回 tunnel 配置和运行态，但不会返回任何 token。
+接口返回 tunnel 配置和运行态，但不会返回任何 token 或管理端密码。Basic Auth 本身不加密用户名密码，公网使用时应配合 HTTPS 或反向代理 TLS。
 
 ### V1 行为说明
 

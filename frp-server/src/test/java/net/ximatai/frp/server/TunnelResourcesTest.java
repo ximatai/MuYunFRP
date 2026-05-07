@@ -16,18 +16,19 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 class TunnelResourcesTest {
 
     @Test
-    void shouldRejectMissingBearerToken() {
+    void shouldRejectMissingBasicAuth() {
         given()
                 .when()
                 .get("/api/tunnel")
                 .then()
-                .statusCode(401);
+                .statusCode(401)
+                .header("WWW-Authenticate", "Basic realm=\"MuYunFRP\"");
     }
 
     @Test
-    void shouldRejectWrongBearerToken() {
+    void shouldRejectWrongBasicAuth() {
         given()
-                .header("Authorization", "Bearer wrong-token")
+                .auth().preemptive().basic("admin", "wrong-password")
                 .when()
                 .get("/api/tunnel")
                 .then()
@@ -37,7 +38,7 @@ class TunnelResourcesTest {
     @Test
     void shouldReturnTunnelRuntime() {
         given()
-                .header("Authorization", "Bearer management-token")
+                .auth().preemptive().basic("admin", "password")
                 .when()
                 .get("/api/tunnel")
                 .then()
@@ -52,7 +53,8 @@ class TunnelResourcesTest {
         public Map<String, String> getConfigOverrides() {
             return Map.ofEntries(
                     Map.entry("frp-server.management.port", "18089"),
-                    Map.entry("frp-server.management.token", "management-token"),
+                    Map.entry("frp-server.management.username", "admin"),
+                    Map.entry("frp-server.management.password", "password"),
                     Map.entry("frp-server.tunnels[0].name", "api-test"),
                     Map.entry("frp-server.tunnels[0].type", "tcp"),
                     Map.entry("frp-server.tunnels[0].open-port", "19582"),

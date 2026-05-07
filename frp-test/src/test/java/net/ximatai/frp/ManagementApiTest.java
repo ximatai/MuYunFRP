@@ -25,8 +25,13 @@ class ManagementApiTest {
                 }
 
                 @Override
-                public String token() {
-                    return "management-token";
+                public String username() {
+                    return "admin";
+                }
+
+                @Override
+                public String password() {
+                    return "password";
                 }
             };
         }
@@ -38,22 +43,23 @@ class ManagementApiTest {
     };
 
     @Test
-    void shouldRejectTunnelApiWithoutBearerToken() throws Exception {
+    void shouldRejectTunnelApiWithoutBasicAuth() throws Exception {
         Response response = resource().tunnels(null);
 
         Assertions.assertEquals(401, response.getStatus());
+        Assertions.assertEquals("Basic realm=\"MuYunFRP\"", response.getHeaderString("WWW-Authenticate"));
     }
 
     @Test
-    void shouldRejectTunnelApiWithWrongBearerToken() throws Exception {
-        Response response = resource().tunnels("Bearer wrong-token");
+    void shouldRejectTunnelApiWithWrongBasicAuth() throws Exception {
+        Response response = resource().tunnels(basicAuth("admin", "wrong-password"));
 
         Assertions.assertEquals(401, response.getStatus());
     }
 
     @Test
-    void shouldReturnTunnelRuntimeWithBearerToken() throws Exception {
-        Response response = resource().tunnels("Bearer management-token");
+    void shouldReturnTunnelRuntimeWithBasicAuth() throws Exception {
+        Response response = resource().tunnels(basicAuth("admin", "password"));
 
         Assertions.assertEquals(200, response.getStatus());
         @SuppressWarnings("unchecked")
@@ -77,5 +83,10 @@ class ManagementApiTest {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private String basicAuth(String username, String password) {
+        return "Basic " + java.util.Base64.getEncoder()
+                .encodeToString((username + ":" + password).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

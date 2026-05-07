@@ -5,7 +5,7 @@
 - 每 tunnel token 鉴权。
 - Agent `AUTH / AUTH_OK / AUTH_FAIL` 握手。
 - 每 tunnel 单 active agent session，后连踢前连。
-- 管理 API Bearer token 鉴权。
+- 管理 API HTTP Basic Auth 鉴权。
 - `/api/tunnel` 返回配置和运行态。
 - TCP/HTTP 透传成功路径和关键鉴权场景测试。
 
