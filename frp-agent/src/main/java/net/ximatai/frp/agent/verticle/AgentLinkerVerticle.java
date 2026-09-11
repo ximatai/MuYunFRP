@@ -304,8 +304,7 @@ public class AgentLinkerVerticle extends AbstractVerticle {
 
         LOGGER.debug("Try connect to target service for request: {}", requestId);
 
-        targetClient()
-                .connect(proxyServer.port(), proxyServer.host())
+        connectTarget(proxyServer)
                 .onSuccess(socket -> onTargetConnected(request, socket))
                 .onFailure(t -> {
                     LOGGER.error("Failed to connect to target service for request: {}", requestId, t);
@@ -318,6 +317,15 @@ public class AgentLinkerVerticle extends AbstractVerticle {
             targetClient = vertx.createNetClient();
         }
         return targetClient;
+    }
+
+    /**
+     * Opens the per-request connection to the configured target. Kept overridable so
+     * transport integrations can control connection establishment without changing
+     * request lifecycle handling.
+     */
+    protected Future<NetSocket> connectTarget(ProxyServer proxyServer) {
+        return targetClient().connect(proxyServer.port(), proxyServer.host());
     }
 
     private void handleDataRequest(String requestId, Buffer data) {

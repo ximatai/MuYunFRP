@@ -2,6 +2,7 @@ package net.ximatai.frp;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.vertx.core.Vertx;
+import io.vertx.core.net.NetServer;
 import io.vertx.junit5.VertxTestContext;
 import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.Agent;
@@ -10,7 +11,6 @@ import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
 import net.ximatai.frp.common.ProxyType;
-import net.ximatai.frp.mock.MockTcpServerVerticle;
 import net.ximatai.frp.server.config.Tunnel;
 import net.ximatai.frp.server.service.TunnelLinkerVerticle;
 import org.junit.jupiter.api.Assertions;
@@ -20,8 +20,9 @@ import org.junit.jupiter.api.TestInstance;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.net.ServerSocket;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
@@ -40,26 +41,46 @@ class TcpFrpTest {
 
     @BeforeAll
     void beforeAll() {
-        mockServerPort = availablePort();
-        frpTunnelAgentPort = availablePort();
-        frpTunnelOpenPort = availablePort();
+        Throwable lastFailure = null;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            TestPorts ports = randomPorts();
+            NetServer candidateMockServer = null;
+            String tunnelDeployment = null;
+            try {
+                candidateMockServer = vertx.createNetServer()
+                        .connectHandler(socket -> socket.handler(socket::write))
+                        .listen(ports.mockServerPort, "127.0.0.1")
+                        .toCompletionStage().toCompletableFuture().join();
 
-        vertx.deployVerticle(new MockTcpServerVerticle(mockServerPort))
-                .toCompletionStage()
-                .toCompletableFuture()
-                .join();
+                Tunnel testTunnel = Tunnel.createRecord("测试", ProxyType.http, ports.openPort, ports.agentPort);
+                tunnelDeployment = vertx.deployVerticle(new TunnelLinkerVerticle(vertx, testTunnel))
+                        .toCompletionStage().toCompletableFuture().join();
 
-        LOGGER.info("mockServer deploy success.");
+                Agent testAgent = testAgent(ports);
+                vertx.deployVerticle(new AgentLinkerVerticle(testAgent))
+                        .toCompletionStage().toCompletableFuture().join();
 
-        Tunnel testTunnel = Tunnel.createRecord("测试", ProxyType.http, frpTunnelOpenPort, frpTunnelAgentPort);
+                mockServerPort = ports.mockServerPort;
+                frpTunnelAgentPort = ports.agentPort;
+                frpTunnelOpenPort = ports.openPort;
+                LOGGER.info("TCP FRP test fixture started on ports mock={}, open={}, agent={}",
+                        mockServerPort, frpTunnelOpenPort, frpTunnelAgentPort);
+                return;
+            } catch (Exception failure) {
+                lastFailure = failure;
+                if (tunnelDeployment != null) {
+                    vertx.undeploy(tunnelDeployment).toCompletionStage().toCompletableFuture().join();
+                }
+                if (candidateMockServer != null) {
+                    candidateMockServer.close().toCompletionStage().toCompletableFuture().join();
+                }
+            }
+        }
+        throw new IllegalStateException("Unable to start TCP FRP test fixture after 20 attempts", lastFailure);
+    }
 
-        TunnelLinkerVerticle tunnelLinkerVerticle = new TunnelLinkerVerticle(vertx, testTunnel);
-
-        vertx.deployVerticle(tunnelLinkerVerticle).toCompletionStage().toCompletableFuture().join();
-
-        LOGGER.info("TunnelLinker success.");
-
-        Agent testAgent = new Agent() {
+    private Agent testAgent(TestPorts ports) {
+        return new Agent() {
             @Override
             public ProxyType type() {
                 return ProxyType.tcp;
@@ -80,7 +101,7 @@ class TcpFrpTest {
 
                     @Override
                     public int port() {
-                        return frpTunnelAgentPort;
+                        return ports.agentPort;
                     }
                 };
             }
@@ -100,18 +121,11 @@ class TcpFrpTest {
 
                     @Override
                     public int port() {
-                        return mockServerPort;
+                        return ports.mockServerPort;
                     }
                 };
             }
         };
-
-        AgentLinkerVerticle agentLinkerVerticle = new AgentLinkerVerticle(testAgent);
-
-        vertx.deployVerticle(agentLinkerVerticle).toCompletionStage().toCompletableFuture().join();
-
-        LOGGER.info("AgentLinker success.");
-
     }
 
     @Test
@@ -193,13 +207,16 @@ class TcpFrpTest {
         }
     }
 
-    private static int availablePort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        } catch (IOException ex) {
-            throw new IllegalStateException("Unable to allocate test port", ex);
+    private static TestPorts randomPorts() {
+        Set<Integer> ports = new HashSet<>();
+        while (ports.size() < 3) {
+            ports.add(ThreadLocalRandom.current().nextInt(20_000, 60_000));
         }
+        int[] values = ports.stream().mapToInt(Integer::intValue).toArray();
+        return new TestPorts(values[0], values[1], values[2]);
     }
+
+    private record TestPorts(int mockServerPort, int agentPort, int openPort) { }
 
     private void verifyMultipartEcho(VertxTestContext testContext, AtomicInteger complete, String expected) {
         AtomicReference<StringBuilder> received = new AtomicReference<>(new StringBuilder());

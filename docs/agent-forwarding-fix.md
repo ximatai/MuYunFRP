@@ -24,7 +24,7 @@
 
 - 原始独立 TCP 复现适配新的私有 CONNECT 方法参数后，最终编译类 0/30 乱序。测试输入和真实 TCP 上游不变。
 - `AgentRequestLifecycleTest`：确定性的 connect-pending FIFO、溢出、连接失败、提前关闭、旧 session 替换、异步目标写失败，共 6 项。
-- `MultipartFrpRegressionTest`：真实 Server/Agent 鉴权隧道 + HTTP 上游，16 KiB、128 KiB、512 KiB 各 4 次，共 12 次上传全部 HTTP 200、SHA-256 一致。使用合成随机字节，不使用安全帽真实录音。
+- `MultipartFrpRegressionTest`：真实 Server/Agent 鉴权隧道 + HTTP 上游，受控延迟目标连接，确保 HTTP 请求的所有 `DATA` 先进入 Agent 队列；512 KiB 合成 multipart 上传返回 HTTP 200、SHA-256 一致。不使用安全帽真实录音。
 - TCP 多连接隔离、已有 HTTP、WebSocket、鉴权和管理/存储测试通过。TCP/HTTP 隧道测试使用临时端口，避免占用 MR 和其他开发服务。
 
 ## 未验证与发布状态
