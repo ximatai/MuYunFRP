@@ -29,6 +29,13 @@ User -> Server open-port -> RequestContext
 - 替换时先标记旧 session inactive，再关闭旧用户连接，最后关闭旧 WebSocket。
 - 无 active session 时，用户连接立即关闭。
 
+## Agent 请求转发
+
+- Agent 收到 `CONNECT` 时立即创建本地请求状态；目标 TCP 连接仍在建立时到达的 `DATA` 进入该请求专属的 FIFO 队列。
+- 队列按写入完成顺序串行写入目标 socket，因此同一 requestId 的 TCP 字节顺序与 Server 发出的 `DATA` 帧顺序一致。
+- 每个请求最多暂存 1 MiB。超过上限、目标连接失败或异步写入失败时，Agent 关闭该请求并向创建它的 Agent session 发送 `CLOSE`。
+- 请求绑定到创建它的控制 WebSocket。控制 session 丢失、被替换或收到 `CLOSE` 后，请求会被移除；晚到的 TCP connect/write 回调只能关闭自身资源，不能重新注册请求或向新 session 写数据。
+
 ## 管理状态
 
 `/api/tunnels` 合并持久化配置和运行态，返回 lifecycle、agent 在线状态、agentName、sessionId、activeConnections、connectedAt、lastSeenAt。接口不返回 tokenHash。

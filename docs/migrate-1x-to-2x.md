@@ -55,13 +55,13 @@ quarkus:
 
 ## 2. 启动新版 Server
 
-下面以 `2.26.1` 为例，实际使用时请替换为你下载的版本号。
+下面以 `2.26.2` 为例，实际使用时请替换为你下载的版本号。
 
 ```shell
 cd ./your-server-folder
 export FRP_SERVER_MANAGEMENT_USERNAME=admin
 export FRP_SERVER_MANAGEMENT_PASSWORD=change-me
-java -jar muyun-frp-server-2.26.1-runner.jar
+java -jar muyun-frp-server-2.26.2-runner.jar
 ```
 
 `./config/application.yml` 和 `./config/tunnels.json` 都按启动命令的当前工作目录解析。建议进入 jar 所在目录后启动。
@@ -130,7 +130,7 @@ frp-agent:
 ```shell
 cd ./your-agent-folder
 export FRP_AGENT_TUNNEL_TOKEN='<agentToken>'
-java -jar muyun-frp-agent-2.26.1-runner.jar
+java -jar muyun-frp-agent-2.26.2-runner.jar
 ```
 
 这里的 `<agentToken>` 替换为创建 tunnel 响应里的真实 token。建议保留引号。

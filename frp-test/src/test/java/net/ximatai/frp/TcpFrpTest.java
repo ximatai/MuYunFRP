@@ -20,6 +20,10 @@ import org.junit.jupiter.api.TestInstance;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 
 @QuarkusTest
@@ -27,15 +31,18 @@ import java.util.concurrent.TimeUnit;
 class TcpFrpTest {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private static final int mockServerPort = 17788;
-    private static final int frpTunnelAgentPort = 18083;
-    private static final int frpTunnelOpenPort = 18082;
+    private int mockServerPort;
+    private int frpTunnelAgentPort;
+    private int frpTunnelOpenPort;
 
     @Inject
     Vertx vertx;
 
     @BeforeAll
     void beforeAll() {
+        mockServerPort = availablePort();
+        frpTunnelAgentPort = availablePort();
+        frpTunnelOpenPort = availablePort();
 
         vertx.deployVerticle(new MockTcpServerVerticle(mockServerPort))
                 .toCompletionStage()
@@ -117,6 +124,49 @@ class TcpFrpTest {
         testWithPort(frpTunnelOpenPort);
     }
 
+    @Test
+    void preservesMultipartTcpByteOrderWhileTargetConnects() throws InterruptedException {
+        VertxTestContext testContext = new VertxTestContext();
+        String[] parts = {"00|", "01|", "02|", "03|", "04|", "05|", "06|", "07|"};
+        String expected = String.join("", parts);
+        AtomicReference<StringBuilder> received = new AtomicReference<>(new StringBuilder());
+
+        vertx.createNetClient()
+                .connect(frpTunnelOpenPort, "127.0.0.1")
+                .onSuccess(socket -> {
+                    socket.handler(buffer -> {
+                        StringBuilder response = received.get();
+                        response.append(buffer.toString());
+                        if (response.length() >= expected.length()) {
+                            testContext.verify(() -> Assertions.assertEquals(expected, response.toString()));
+                            testContext.completeNow();
+                        }
+                    });
+                    for (String part : parts) {
+                        socket.write(part);
+                    }
+                })
+                .onFailure(testContext::failNow);
+
+        Assertions.assertTrue(testContext.awaitCompletion(10, TimeUnit.SECONDS));
+        if (testContext.failed()) {
+            throw new AssertionError(testContext.causeOfFailure());
+        }
+    }
+
+    @Test
+    void keepsMultipartStreamsIsolatedAcrossConnections() throws InterruptedException {
+        VertxTestContext testContext = new VertxTestContext();
+        AtomicInteger complete = new AtomicInteger();
+        verifyMultipartEcho(testContext, complete, "a0|a1|a2|a3|");
+        verifyMultipartEcho(testContext, complete, "b0|b1|b2|b3|");
+
+        Assertions.assertTrue(testContext.awaitCompletion(10, TimeUnit.SECONDS));
+        if (testContext.failed()) {
+            throw new AssertionError(testContext.causeOfFailure());
+        }
+    }
+
     private void testWithPort(int port) throws InterruptedException {
         VertxTestContext testContext = new VertxTestContext();
 
@@ -141,6 +191,36 @@ class TcpFrpTest {
         if (testContext.failed()) {
             throw new AssertionError(testContext.causeOfFailure());
         }
+    }
+
+    private static int availablePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unable to allocate test port", ex);
+        }
+    }
+
+    private void verifyMultipartEcho(VertxTestContext testContext, AtomicInteger complete, String expected) {
+        AtomicReference<StringBuilder> received = new AtomicReference<>(new StringBuilder());
+        vertx.createNetClient()
+                .connect(frpTunnelOpenPort, "127.0.0.1")
+                .onSuccess(socket -> {
+                    socket.handler(buffer -> {
+                        StringBuilder response = received.get();
+                        response.append(buffer.toString());
+                        if (response.length() >= expected.length()) {
+                            testContext.verify(() -> Assertions.assertEquals(expected, response.toString()));
+                            if (complete.incrementAndGet() == 2) {
+                                testContext.completeNow();
+                            }
+                        }
+                    });
+                    for (int offset = 0; offset < expected.length(); offset += 3) {
+                        socket.write(expected.substring(offset, offset + 3));
+                    }
+                })
+                .onFailure(testContext::failNow);
     }
 
 }

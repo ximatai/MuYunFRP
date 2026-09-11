@@ -31,9 +31,9 @@ import static org.hamcrest.CoreMatchers.is;
 class WebFrpTest {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private static final int mockServerPort = 7788;
-    private static final int frpTunnelAgentPort = 8083;
-    private static final int frpTunnelOpenPort = 8082;
+    private static final int mockServerPort = availablePort();
+    private static final int frpTunnelAgentPort = availablePort();
+    private static final int frpTunnelOpenPort = availablePort();
 
     static {
         RestAssured.config = RestAssured.config()
@@ -153,4 +153,11 @@ class WebFrpTest {
         System.out.println("===");
     }
 
+    private static int availablePort() {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (java.io.IOException failure) {
+            throw new IllegalStateException("Unable to allocate test port", failure);
+        }
+    }
 }
