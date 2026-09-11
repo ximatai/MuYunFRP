@@ -4,6 +4,9 @@ import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.config.HttpClientConfig;
 import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpServer;
+import io.vertx.ext.web.Router;
+import io.vertx.ext.web.handler.BodyHandler;
 import jakarta.inject.Inject;
 import net.ximatai.frp.agent.config.Agent;
 import net.ximatai.frp.agent.config.Auth;
@@ -11,7 +14,6 @@ import net.ximatai.frp.agent.config.FrpTunnel;
 import net.ximatai.frp.agent.config.ProxyServer;
 import net.ximatai.frp.agent.verticle.AgentLinkerVerticle;
 import net.ximatai.frp.common.ProxyType;
-import net.ximatai.frp.mock.MockWebServerVerticle;
 import net.ximatai.frp.server.config.Tunnel;
 import net.ximatai.frp.server.service.TunnelLinkerVerticle;
 import org.junit.jupiter.api.Assertions;
@@ -22,6 +24,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
@@ -31,9 +36,9 @@ import static org.hamcrest.CoreMatchers.is;
 class WebFrpTest {
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private static final int mockServerPort = 7788;
-    private static final int frpTunnelAgentPort = 8083;
-    private static final int frpTunnelOpenPort = 8082;
+    private int mockServerPort;
+    private int frpTunnelAgentPort;
+    private int frpTunnelOpenPort;
 
     static {
         RestAssured.config = RestAssured.config()
@@ -50,23 +55,40 @@ class WebFrpTest {
     void beforeAll() {
 
         Assertions.assertFalse(Boolean.getBoolean("vertx.disableWebsockets"));
+        Throwable lastFailure = null;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            TestPorts ports = randomPorts();
+            HttpServer candidateMockServer = null;
+            String tunnelDeployment = null;
+            try {
+                candidateMockServer = startMockServer(ports.mockServerPort);
+                Tunnel testTunnel = Tunnel.createRecord("测试", ProxyType.http, ports.openPort, ports.agentPort);
+                tunnelDeployment = vertx.deployVerticle(new TunnelLinkerVerticle(vertx, testTunnel))
+                        .toCompletionStage().toCompletableFuture().join();
+                vertx.deployVerticle(new AgentLinkerVerticle(testAgent(ports)))
+                        .toCompletionStage().toCompletableFuture().join();
 
-        vertx.deployVerticle(new MockWebServerVerticle(mockServerPort))
-                .toCompletionStage()
-                .toCompletableFuture()
-                .join();
+                mockServerPort = ports.mockServerPort;
+                frpTunnelAgentPort = ports.agentPort;
+                frpTunnelOpenPort = ports.openPort;
+                LOGGER.info("HTTP FRP test fixture started on ports mock={}, open={}, agent={}",
+                        mockServerPort, frpTunnelOpenPort, frpTunnelAgentPort);
+                return;
+            } catch (Exception failure) {
+                lastFailure = failure;
+                if (tunnelDeployment != null) {
+                    vertx.undeploy(tunnelDeployment).toCompletionStage().toCompletableFuture().join();
+                }
+                if (candidateMockServer != null) {
+                    candidateMockServer.close().toCompletionStage().toCompletableFuture().join();
+                }
+            }
+        }
+        throw new IllegalStateException("Unable to start HTTP FRP test fixture after 20 attempts", lastFailure);
+    }
 
-        LOGGER.info("mockServer deploy success.");
-
-        Tunnel testTunnel = Tunnel.createRecord("测试", ProxyType.http, frpTunnelOpenPort, frpTunnelAgentPort);
-
-        TunnelLinkerVerticle tunnelLinkerVerticle = new TunnelLinkerVerticle(vertx, testTunnel);
-
-        vertx.deployVerticle(tunnelLinkerVerticle).toCompletionStage().toCompletableFuture().join();
-
-        LOGGER.info("TunnelLinker success.");
-
-        Agent testAgent = new Agent() {
+    private Agent testAgent(TestPorts ports) {
+        return new Agent() {
             @Override
             public ProxyType type() {
                 return ProxyType.http;
@@ -87,7 +109,7 @@ class WebFrpTest {
 
                     @Override
                     public int port() {
-                        return frpTunnelAgentPort;
+                        return ports.agentPort;
                     }
                 };
             }
@@ -107,18 +129,11 @@ class WebFrpTest {
 
                     @Override
                     public int port() {
-                        return mockServerPort;
+                        return ports.mockServerPort;
                     }
                 };
             }
         };
-
-        AgentLinkerVerticle agentLinkerVerticle = new AgentLinkerVerticle(testAgent);
-
-        vertx.deployVerticle(agentLinkerVerticle).toCompletionStage().toCompletableFuture().join();
-
-        LOGGER.info("AgentLinker success.");
-
     }
 
     @Test
@@ -153,4 +168,28 @@ class WebFrpTest {
         System.out.println("===");
     }
 
+    private HttpServer startMockServer(int port) {
+        Router router = Router.router(vertx);
+        router.get("/test").handler(ctx -> ctx.response().end("hello"));
+        router.post("/test")
+                .handler(BodyHandler.create())
+                .handler(ctx -> {
+                    var body = ctx.body().asJsonObject();
+                    ctx.response().end("hello %s".formatted(body.getString("name", "world")));
+                });
+        return vertx.createHttpServer().requestHandler(router)
+                .listen(port, "127.0.0.1")
+                .toCompletionStage().toCompletableFuture().join();
+    }
+
+    private static TestPorts randomPorts() {
+        Set<Integer> ports = new HashSet<>();
+        while (ports.size() < 3) {
+            ports.add(ThreadLocalRandom.current().nextInt(20_000, 60_000));
+        }
+        int[] values = ports.stream().mapToInt(Integer::intValue).toArray();
+        return new TestPorts(values[0], values[1], values[2]);
+    }
+
+    private record TestPorts(int mockServerPort, int agentPort, int openPort) { }
 }

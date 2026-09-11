@@ -45,8 +45,8 @@ User
 
 - JRE 21+
 - 从 [GitHub Releases](https://github.com/ximatai/MuYunFRP/releases) 下载：
-  - `muyun-frp-server-x.x.x-runner.jar`，例如 `muyun-frp-server-2.26.1-runner.jar`
-  - `muyun-frp-agent-x.x.x-runner.jar`，例如 `muyun-frp-agent-2.26.1-runner.jar`
+  - `muyun-frp-server-x.x.x-runner.jar`，例如 `muyun-frp-server-2.26.2-runner.jar`
+  - `muyun-frp-agent-x.x.x-runner.jar`，例如 `muyun-frp-agent-2.26.2-runner.jar`
 
 ### 2. 准备 Server 配置
 
