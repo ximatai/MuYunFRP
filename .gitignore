@@ -3,5 +3,5 @@
 build
 out
 .DS_Store
-frp-agent/src/main/resources/application.yml
-frp-server/src/main/resources/application.yml
+# Local runtime configuration; keep application-demo.yml examples tracked.
+application.yml
